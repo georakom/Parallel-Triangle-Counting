@@ -95,8 +95,8 @@ def read_graph_from_file(filename):
 
 if __name__ == "__main__":
 
-    filepath = "C:/Users/Jorjm/OneDrive/Desktop/All ptixiaki codes/data/"
-    filename = "facebook.txt"
+    filepath = "C:/Users/Jorjm/OneDrive/Desktop/All ptixiaki codes/data"
+    filename = "/facebook.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)

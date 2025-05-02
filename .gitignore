@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+*.egg
+dist/
+build/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+site.py
+*.manifest
+*.spec
+.ipynb_checkpoints/
+.pytest_cache/
+.coverage
+htmlcov/
+*.mo
+
+# Windows
+Thumbs.db
+[Dd]esktop.ini
+*.lnk
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/
+*.code-workspace
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Debug
+*.log
+*.sqlite3
+*.pot
+*.py,cover
+.hypothesis/
+.mypy_cache/
