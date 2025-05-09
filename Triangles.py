@@ -95,13 +95,17 @@ def read_graph_from_file(filename):
 
 if __name__ == "__main__":
 
-    filepath = "C:/Users/Jorjm/OneDrive/Desktop/Triangle_Counting/data/"
-    filename = "facebook.txt"
+    filepath = "./data/"
+    filename = "Email-Enron.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
+
+        avg_degree = sum(dict(graph.degree()).values()) / graph.number_of_nodes()
+        print(f"Average degree of the graph: {avg_degree:.2f}")
+
         start_time = time.time()
-        total_triangles, mirror_count, total_mirrors = parallel_triangle_count(graph, 4)   
+        total_triangles, mirror_count, total_mirrors = parallel_triangle_count(graph, 32)   
         end_time = time.time()
 
         print(f"Total triangles: {total_triangles}")
