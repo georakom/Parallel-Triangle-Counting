@@ -6,6 +6,7 @@ import random
 from collections import defaultdict
 import metis
 
+
 def metis_partition(G, num_workers):
     """Partitions the undirected graph using METIS before DAG construction."""
     (edgecuts, parts) = metis.part_graph(G, nparts=num_workers)
