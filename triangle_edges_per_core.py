@@ -60,7 +60,7 @@ def tc_hash_worker(edges, A_sets):
 
 def parallel_triangle_count(G, num_workers, method="merge"):
     # Build node ranking
-    nodes_sorted_by_degree = sorted(G.nodes(), key=lambda x: G.degree(x), reverse=True)
+    nodes_sorted_by_degree = sorted(G.nodes(), key=lambda x: G.degree(x))
     node_ranking = {node: i for i, node in enumerate(nodes_sorted_by_degree)}
     
     A_plus = build_A_plus(G, node_ranking)

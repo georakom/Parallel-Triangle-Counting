@@ -64,7 +64,7 @@ def tc_hash_wrapper(args):
     return tc_hash_worker(*args)
 
 def parallel_triangle_count(G, num_workers, method="merge"):
-    nodes_sorted_by_degree = sorted(G.nodes(), key=lambda x: G.degree(x), reverse=True)
+    nodes_sorted_by_degree = sorted(G.nodes(), key=lambda x: G.degree(x))
     node_ranking = {node: i for i, node in enumerate(nodes_sorted_by_degree)}
     A_plus = build_A_plus(G, node_ranking)
     edge_list = [(u, v) for u in A_plus for v in A_plus[u]]
