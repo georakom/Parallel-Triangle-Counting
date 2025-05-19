@@ -129,7 +129,7 @@ def _worker_wrapper(method, shm_name_indptr, shm_name_indices, n_nodes, nodes_ch
         sem.release()
 
 
-def parallel_triangle_count(G, num_workers=4, method="merge", chunk_size=10000):
+def parallel_triangle_count(G, num_workers, method="merge", chunk_size=10000):
     rank = rank_by_degree(G)
     indptr, indices, nodes, node_to_idx = build_A_plus_csr(G, rank)
 

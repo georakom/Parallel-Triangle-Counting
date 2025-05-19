@@ -118,7 +118,7 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
     return_dict[mp.current_process().name] = local_count
 
 
-def parallel_triangle_count(G, num_workers=4, method="merge"):
+def parallel_triangle_count(G, num_workers, method="merge"):
     rank = rank_by_degree(G)
     indptr, indices, nodes, node_to_idx = build_A_plus_csr(G, rank)
 
