@@ -107,7 +107,7 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
             w_idx = node_to_idx[w]
             neighbors_w = indices[indptr[w_idx]:indptr[w_idx + 1]]
             # Use smaller array to query larger set for hashing
-            if len(neighbors_v) < len(neighbors_w):
+            if len(neighbors_v) < len(neighbors_w):   # Can work both ways here
                 local_count += hash_intersect_count(neighbors_v, set(neighbors_w))
             else:
                 local_count += hash_intersect_count(neighbors_w, set(neighbors_v))
