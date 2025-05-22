@@ -71,7 +71,10 @@ def parallel_triangle_count(G, num_workers):
     partitions = [[] for _ in range(num_workers)]
 
     # Use METIS to assign master nodes (just node -> partition)
+    metis_start = time.time()
     _, parts = metis.part_graph(DAG, nparts=num_workers)
+    metis_finish = time.time()
+    print(f"METIS partition alone took: {metis_finish - metis_start:.4f} seconds.")
     for node, part in zip(G.nodes(), parts):
         worker_assignments[node] = part
         partitions[part].append(node)
@@ -97,11 +100,15 @@ def parallel_triangle_count(G, num_workers):
 
     end_pre_time = time.time()
     print(f"Preprocessing took: {end_pre_time - start_pre_time:.6f} seconds")
+
+    triangle_time = time.time()
     with Pool(processes=num_workers) as pool:
         results = pool.starmap(
             triangle_count_worker,
             [(subgraph, meta["master_nodes"], meta["node_ranking"]) for subgraph, meta in proxy_subgraphs]
         )
+    triangle_finish = time.time()
+    print(f"Pure triangle counting took: {triangle_finish - triangle_time:.4f} seconds")
     return sum(results)
 
 def read_graph_from_file(filename):
@@ -116,7 +123,7 @@ def read_graph_from_file(filename):
 if __name__ == "__main__":
 
     filepath = "./data/"
-    filename = "Email-Enron.txt"
+    filename = "amazon.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
