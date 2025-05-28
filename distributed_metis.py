@@ -7,6 +7,12 @@ from collections import defaultdict
 import metis
 import psutil
 
+""" 
+Distributed Parallel Triangle Counting using METIS. 
+While pure triangle-counting is extremely fast, we have a very noticeable preprocessing and memory overhead. 
+Due to METIS non triangle-aware partitioning, we end up losing scalability, especially in memory 
+(the more cores/workers we assign, the more total mirrors we end up having).
+"""
 def partition_graph(G, num_workers):
     """Use METIS to partition an undirected graph. Returns partitions and assignments."""
     metis_time = time.time()
@@ -19,31 +25,64 @@ def partition_graph(G, num_workers):
         assignments[node] = part
     return partitions, assignments
 
-def extract_partition_edges(G, master_nodes, assignments, worker_id):
+# def count_mirror_nodes(G, partitions, assignments):
+#     """
+#     For each worker, count mirror nodes based on master nodes' neighbors
+#     """
+#     total_mirrors = 0
+#     for worker_id, master_nodes in enumerate(partitions):
+#         master_set = set(master_nodes)
+#         mirror_set = set()
+#
+#         for u in master_nodes:
+#             for v in G[u]:  # neighbors
+#                 if v not in master_set:
+#                     mirror_set.add(v)
+#
+#         print(f"[Worker {worker_id}] Mirror nodes: {len(mirror_set)}")
+#         total_mirrors += len(mirror_set)
+#
+#     print(f"\nTotal mirror nodes: {total_mirrors}")
+#     return total_mirrors
+
+def extract_all_worker_data(G, partitions, assignments, num_workers):
     """
-    For a given worker, assign edges based on simulated DAG (u < v), and include triangle-completing edges.
+    Optimized version: builds all edge lists in a single pass.
     """
-    local_edges = []
-    local_nodes = set(master_nodes)
+    # Prepare per-worker storage
+    worker_edges = [set() for _ in range(num_workers)]
+    worker_nodes_used = [set() for _ in range(num_workers)]
 
     for u, v in G.edges():
-        if u < v:
-            src, dst = u, v
-        else:
-            src, dst = v, u
+        # Simulate DAG direction: always go u → v if u < v
+        if u > v:
+            u, v = v, u
 
-        if assignments[src] == worker_id:
-            local_edges.append((src, dst))
-            local_nodes.add(dst)
+        worker_id = assignments[u]
+        worker_edges[worker_id].add((u, v))
+        worker_nodes_used[worker_id].update([u, v])
 
-    # Include proxy edges between local-local nodes
-    all_edges = set(local_edges)
-    for u, v in G.edges():
-        if u in local_nodes and v in local_nodes:
-            u_dag, v_dag = (u, v) if u < v else (v, u)
-            all_edges.add((u_dag, v_dag))
+    # Proxy edges: any edge between nodes used by a worker should be included
+    all_edges = list(G.edges())
+    for worker_id in range(num_workers):
+        local_nodes = worker_nodes_used[worker_id]
+        for u, v in all_edges:
+            if u in local_nodes and v in local_nodes:
+                if u > v:
+                    u, v = v, u
+                worker_edges[worker_id].add((u, v))
 
-    return list(all_edges), set(master_nodes)
+    # Track master/mirror sets
+    worker_data = []
+    for worker_id in range(num_workers):
+        masters = set(partitions[worker_id])
+        used_nodes = {u for edge in worker_edges[worker_id] for u in edge}
+        mirrors = used_nodes - masters
+        print(f"[Worker {worker_id}] Mirror nodes: {len(mirrors)}")
+        worker_data.append((list(worker_edges[worker_id]), masters))
+
+    return worker_data
+
 
 def edge_iterator_hashed(edge_list, master_nodes):
     process = psutil.Process(os.getpid())
@@ -66,19 +105,17 @@ def parallel_triangle_count(G, num_workers):
 
     # Step 1: Partitioning
     partitions, assignments = partition_graph(G, num_workers)
-
+    #total_mirrors = count_mirror_nodes(G, partitions, assignments)
     prepare_time = time.time()
+
     # Step 2: Prepare edge sets for each worker
-    worker_data = []
-    for worker_id in range(num_workers):
-        master_nodes = partitions[worker_id]
-        edge_list, master_set = extract_partition_edges(G, master_nodes, assignments, worker_id)
-        worker_data.append((edge_list, master_set))
+    worker_data = extract_all_worker_data(G, partitions, assignments, num_workers)
+
     print(f"Data preparation took: {time.time() - prepare_time:.4f} seconds")
     end_pre_time = time.time()
     print(f"Preprocessing took: {end_pre_time - start_pre_time:.6f} seconds")
-
     triangle_time = time.time()
+
     with Pool(processes=num_workers) as pool:
         results = pool.starmap(edge_iterator_hashed, worker_data)
     triangle_finish = time.time()
