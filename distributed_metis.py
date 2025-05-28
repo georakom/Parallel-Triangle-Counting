@@ -5,109 +5,84 @@ import time
 import random
 from collections import defaultdict
 import metis
+import psutil
 
-def preprocess_graph(G):
-    """Builds DAG and computes node ranking based on degree."""
-    nodes_sorted_by_degree = sorted(G.nodes(), key=lambda x: G.degree(x), reverse=True)
-    node_ranking = {node: i for i, node in enumerate(nodes_sorted_by_degree)}
-    DAG = nx.DiGraph()
+def partition_graph(G, num_workers):
+    """Use METIS to partition an undirected graph. Returns partitions and assignments."""
+    metis_time = time.time()
+    _, parts = metis.part_graph(G, nparts=num_workers)
+    print(f"METIS took: {time.time() - metis_time:.4f} seconds")
+    partitions = [[] for _ in range(num_workers)]
+    assignments = {}
+    for node, part in zip(G.nodes(), parts):
+        partitions[part].append(node)
+        assignments[node] = part
+    return partitions, assignments
+
+def extract_partition_edges(G, master_nodes, assignments, worker_id):
+    """
+    For a given worker, assign edges based on simulated DAG (u < v), and include triangle-completing edges.
+    """
+    local_edges = []
+    local_nodes = set(master_nodes)
 
     for u, v in G.edges():
-        if node_ranking[u] < node_ranking[v]:
-            DAG.add_edge(u, v)
+        if u < v:
+            src, dst = u, v
         else:
-            DAG.add_edge(v, u)
+            src, dst = v, u
 
-    return DAG, node_ranking
+        if assignments[src] == worker_id:
+            local_edges.append((src, dst))
+            local_nodes.add(dst)
 
-
-def build_proxy_subgraph(worker_id, master_nodes, all_edges, node_ranking, worker_assignments):
-    # Step 1: Collect all edges assigned to this worker
-    local_edges = [e for e in all_edges if worker_assignments[e[0]] == worker_id]
-
-    # Step 2: Identify all nodes needed
-    local_nodes = set()
-    for u, v in local_edges:
-        local_nodes.add(u)  # master
-        local_nodes.add(v)  # potential mirror
-
-    # Step 3: Include edge proxies (triangle-completing edges)
-    # Add any edge from DAG if both u and v are in local_nodes
-    full_local_edges = set(local_edges)
-    for u, v in all_edges:
+    # Include proxy edges between local-local nodes
+    all_edges = set(local_edges)
+    for u, v in G.edges():
         if u in local_nodes and v in local_nodes:
-            full_local_edges.add((u, v))  # ensure triangle closure
+            u_dag, v_dag = (u, v) if u < v else (v, u)
+            all_edges.add((u_dag, v_dag))
 
-    # Step 4: Build subgraph
-    subgraph = nx.DiGraph()
-    # Add all master nodes explicitly (even if they have no edges)
-    subgraph.add_nodes_from(set(master_nodes) | local_nodes)
-    subgraph.add_edges_from(full_local_edges)
+    return list(all_edges), set(master_nodes)
 
-    return subgraph, {
-        "master_nodes": set(master_nodes),
-        "node_ranking": node_ranking
-    }
+def edge_iterator_hashed(edge_list, master_nodes):
+    process = psutil.Process(os.getpid())
+    mem_usage_mb = process.memory_info().rss / (1024 * 1024)
+    triangle_count = 0
 
+    neighbor_sets = defaultdict(set)
+    for u, v in edge_list:
+        neighbor_sets[u].add(v)
 
-def triangle_count_worker(G_local, master_nodes, node_ranking):
-    count = 0
-    for v in master_nodes:
-        neighbors_v = {u for u in G_local.successors(v) if node_ranking[u] > node_ranking[v]}
-        for u in neighbors_v:
-            neighbors_u = {w for w in G_local.successors(u) if node_ranking[w] > node_ranking[u]}
-            count += len(neighbors_v & neighbors_u)
-    print(f"Worker FINISHED. Found {count} triangles.", flush=True)
-    return count
+    for u in master_nodes:
+        for v in neighbor_sets[u]:
+            triangle_count += len(neighbor_sets[u] & neighbor_sets.get(v, set()))
 
+    print(f"[Worker {os.getpid()}] FINISHED. Found {triangle_count} triangles. Memory used: {mem_usage_mb:.2f} MB", flush=True)
+    return triangle_count
 
 def parallel_triangle_count(G, num_workers):
     start_pre_time = time.time()
 
-    DAG, node_ranking = preprocess_graph(G)
+    # Step 1: Partitioning
+    partitions, assignments = partition_graph(G, num_workers)
 
-    # After DAG is built
-    worker_assignments = {}  # node -> worker
-    partitions = [[] for _ in range(num_workers)]
-
-    # Use METIS to assign master nodes (just node -> partition)
-    metis_start = time.time()
-    _, parts = metis.part_graph(DAG, nparts=num_workers)
-    metis_finish = time.time()
-    print(f"METIS partition alone took: {metis_finish - metis_start:.4f} seconds.")
-    for node, part in zip(G.nodes(), parts):
-        worker_assignments[node] = part
-        partitions[part].append(node)
-
-    # Now assign all outgoing edges of each master to the same worker
-    worker_edges = [set() for _ in range(num_workers)]
-    for u, v in DAG.edges():
-        master_worker = worker_assignments[u]  # Because u → v
-        worker_edges[master_worker].add((u, v))
-
-    proxy_subgraphs = []
-
+    prepare_time = time.time()
+    # Step 2: Prepare edge sets for each worker
+    worker_data = []
     for worker_id in range(num_workers):
         master_nodes = partitions[worker_id]
-        subgraph, meta = build_proxy_subgraph(
-            worker_id=worker_id,
-            master_nodes=master_nodes,
-            all_edges=DAG.edges(),
-            node_ranking=node_ranking,
-            worker_assignments=worker_assignments
-        )
-        proxy_subgraphs.append((subgraph, meta))
-
+        edge_list, master_set = extract_partition_edges(G, master_nodes, assignments, worker_id)
+        worker_data.append((edge_list, master_set))
+    print(f"Data preparation took: {time.time() - prepare_time:.4f} seconds")
     end_pre_time = time.time()
     print(f"Preprocessing took: {end_pre_time - start_pre_time:.6f} seconds")
 
     triangle_time = time.time()
     with Pool(processes=num_workers) as pool:
-        results = pool.starmap(
-            triangle_count_worker,
-            [(subgraph, meta["master_nodes"], meta["node_ranking"]) for subgraph, meta in proxy_subgraphs]
-        )
+        results = pool.starmap(edge_iterator_hashed, worker_data)
     triangle_finish = time.time()
+
     print(f"Pure triangle counting took: {triangle_finish - triangle_time:.4f} seconds")
     return sum(results)
 
@@ -121,7 +96,6 @@ def read_graph_from_file(filename):
     return G
 
 if __name__ == "__main__":
-
     filepath = "./data/"
     filename = "amazon.txt"
 
@@ -130,6 +104,8 @@ if __name__ == "__main__":
 
         avg_degree = sum(dict(graph.degree()).values()) / graph.number_of_nodes()
         print(f"Average degree of the graph: {avg_degree:.2f}")
+        print(f"Number of Nodes: {graph.number_of_nodes()}")
+        print(f"Number of Edges: {graph.number_of_edges()}")
 
         start_time = time.time()
         total_triangles = parallel_triangle_count(graph, 4)
@@ -144,5 +120,6 @@ if __name__ == "__main__":
         end_time = time.time()
         print(f"Total triangles (NetworkX): {triangles_networkx_count}")
         print("Triangle Algorithm time (NetworkX): ", end_time - start_time)
+
     except FileNotFoundError:
         print("File not found")
