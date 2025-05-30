@@ -17,6 +17,7 @@ def extract_all_worker_data(G, partitions, assignments, num_workers):
         worker_nodes_used[worker_id].update([u, v])
 
     all_edges = list(G.edges())
+    worker_data = []
     for worker_id in range(num_workers):
         local_nodes = worker_nodes_used[worker_id]
         for u, v in all_edges:
@@ -24,14 +25,12 @@ def extract_all_worker_data(G, partitions, assignments, num_workers):
                 if u > v:
                     u, v = v, u
                 worker_edges[worker_id].add((u, v))
-
-    worker_data = []
-    for worker_id in range(num_workers):
         masters = set(partitions[worker_id])
         used_nodes = {u for edge in worker_edges[worker_id] for u in edge}
         mirrors = used_nodes - masters
         print(f"[Worker {worker_id}] Mirror nodes: {len(mirrors)}")
         worker_data.append((list(worker_edges[worker_id]), masters))
+
     return worker_data
 
 
@@ -76,10 +75,10 @@ def read_graph_from_file(filename):
 
 if __name__ == "__main__":
     import sys
-    from Partitioners import metis_partition # Importing the partitioning algorithm to use
+    from Partitioners import ldg_partition # Importing the partitioning algorithm to use
 
     filepath = "./data/"
-    filename = "facebook.txt"
+    filename = "amazon.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
@@ -90,7 +89,7 @@ if __name__ == "__main__":
         print(f"Number of Edges: {graph.number_of_edges()}")
 
         start_time = time.time()
-        total_triangles = parallel_triangle_count(graph, 4, metis_partition) # Deciding the partition
+        total_triangles = parallel_triangle_count(graph, 4, ldg_partition) # Deciding the partition
         end_time = time.time()
 
         print(f"Total triangles: {total_triangles}")

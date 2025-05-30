@@ -2,3 +2,5 @@ from .metis_partition import partition_graph as metis_partition
 from .louvain_partition import partition_graph as louvain_partition
 from .label_propagation_partition import partition_graph as label_propagation_partition
 from .greedy_modularity_partition import partition_graph as greedy_modularity_partition
+from .fennel_partition import partition_graph as fennel_partition
+from .ldg_partition import partition_graph_ldg as ldg_partition
