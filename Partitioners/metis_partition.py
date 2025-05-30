@@ -4,8 +4,7 @@ import metis
 """ 
 Distributed Parallel Triangle Counting using METIS. 
 While pure triangle-counting is extremely fast, we have a very noticeable preprocessing and memory overhead. 
-Due to METIS non triangle-aware partitioning, we end up losing scalability, especially in memory 
-(the more cores/workers we assign, the more total mirrors we end up having).
+Due to METIS non triangle-aware partitioning, we end up losing scalability, especially in memory.
 """
 
 def partition_graph(G, num_workers):

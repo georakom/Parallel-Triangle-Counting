@@ -2,12 +2,13 @@ import time
 import random
 from collections import defaultdict
 
+"""
+Linear Deterministic Greedy (LDG) Partitioning.
+Each node is streamed in, and assigned to the partition that maximizes:
+    score = (# neighbors in partition) - (load_penalty)
+"""
+
 def partition_graph_ldg(G, num_workers, capacity_factor=1.05):
-    """
-    Linear Deterministic Greedy (LDG) Partitioning.
-    Each node is streamed in, and assigned to the partition that maximizes:
-        score = (# neighbors in partition) - (load_penalty)
-    """
     start = time.time()
     partitions = [[] for _ in range(num_workers)]
     assignments = {}
