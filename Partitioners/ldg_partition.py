@@ -4,8 +4,12 @@ from collections import defaultdict
 
 """
 Linear Deterministic Greedy (LDG) Partitioning.
+Assign each node to the partition where it shares the most neighbors (connectivity-based), 
+with a bias toward smaller partitions (to balance load).
 Each node is streamed in, and assigned to the partition that maximizes:
     score = (# neighbors in partition) - (load_penalty)
+        -The first term rewards locality (connectivity).
+        -The second term penalizes imbalance.
 """
 
 def partition_graph_ldg(G, num_workers, capacity_factor=1.05):

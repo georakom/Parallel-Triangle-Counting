@@ -2,11 +2,14 @@ import random
 from collections import defaultdict
 import math
 
+"""
+Fennel-inspired streaming partitioning.
+Balances edges and sizes with streaming assignments.
+It balances partitions with a tunable cost model,
+aiming to minimize a graph cut while balancing partition sizes.
+"""
+
 def partition_graph(G, num_workers, alpha=1.5):
-    """
-    Fennel-inspired streaming partitioning.
-    Balances edges and sizes with streaming assignments.
-    """
     nodes = list(G.nodes())
     random.shuffle(nodes)
 

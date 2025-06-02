@@ -1,3 +1,4 @@
+import random
 import time
 from multiprocessing import Pool
 import networkx as nx
@@ -68,9 +69,9 @@ def parallel_triangle_count(G, num_workers, partition_func):
 def read_graph_from_file(filename):
     G = nx.Graph()
     with open(filename, 'r') as file:
-        for line in file:
-            u, v = map(int, line.strip().split())
-            G.add_edge(u, v)
+        edges = [tuple(map(int, line.strip().split())) for line in file]
+    random.shuffle(edges)
+    G.add_edges_from(edges)
     return G
 
 if __name__ == "__main__":
