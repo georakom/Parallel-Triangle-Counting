@@ -10,16 +10,6 @@ import os
 # Shared-Memory Parallel Triangle Counting with TC-Merge and TC-Hash
 # Work between cores is split based on num_edges / cores
 
-def read_graph_from_file(filename):
-    G = nx.Graph()
-    with open(filename, 'r') as file:
-        edges = [tuple(map(int, line.strip().split())) for line in file]
-    random.shuffle(edges)
-    for u, v in edges:
-        G.add_edge(u, v)
-    return G
-
-
 def rank_by_degree(G):
     nodes_sorted = sorted(G.nodes(), key=lambda x: G.degree[x])
     rank = {node: i for i, node in enumerate(nodes_sorted)}
@@ -168,6 +158,33 @@ def parallel_triangle_count(G, num_workers, method="merge"):
 
     return total_triangles
 
+
+def read_graph_from_file(filename, batch_size=1_000_000):
+    G = nx.Graph()
+    edge_buffer = []
+
+    with open(filename, 'r') as file:
+        for line in file:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                try:
+                    u, v = map(int, parts)
+                    edge_buffer.append((u, v))
+
+                    # Process in batches to limit memory
+                    if len(edge_buffer) >= batch_size:
+                        random.shuffle(edge_buffer)
+                        G.add_edges_from(edge_buffer)
+                        edge_buffer = []
+                except ValueError:
+                    continue
+
+        # Add remaining edges
+        if edge_buffer:
+            random.shuffle(edge_buffer)
+            G.add_edges_from(edge_buffer)
+
+    return G
 
 if __name__ == "__main__":
     filepath = "./data/"

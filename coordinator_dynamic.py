@@ -132,13 +132,31 @@ def coordinator(graph, num_workers, task_queue, result_queues):
     print(f"\nTotal triangles: {total}")
 
 
-
-def read_graph_from_file(filename):
+def read_graph_from_file(filename, batch_size=1_000_000):
     G = nx.Graph()
+    edge_buffer = []
+
     with open(filename, 'r') as file:
-        edges = [tuple(map(int, line.strip().split())) for line in file]
-    random.shuffle(edges)
-    G.add_edges_from(edges)
+        for line in file:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                try:
+                    u, v = map(int, parts)
+                    edge_buffer.append((u, v))
+
+                    # Process in batches to limit memory
+                    if len(edge_buffer) >= batch_size:
+                        random.shuffle(edge_buffer)
+                        G.add_edges_from(edge_buffer)
+                        edge_buffer = []
+                except ValueError:
+                    continue
+
+        # Add remaining edges
+        if edge_buffer:
+            random.shuffle(edge_buffer)
+            G.add_edges_from(edge_buffer)
+
     return G
 
 
@@ -147,7 +165,7 @@ if __name__ == "__main__":
     filename = "com-youtube.ungraph.txt"
 
     try:
-        graph = read_graph_from_file(filepath + filename)
+        graph = read_graph_from_file(filepath + filename )
         print(f"Average degree of the graph: {sum(dict(graph.degree()).values()) / graph.number_of_nodes():.2f}")
         print(f"Number of Nodes: {graph.number_of_nodes()}")
         print(f"Number of Edges: {graph.number_of_edges()}")

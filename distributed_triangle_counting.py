@@ -66,12 +66,31 @@ def parallel_triangle_count(G, num_workers, partition_func):
     print(f"Pure triangle counting took: {time.time() - triangle_time:.4f} seconds")
     return sum(results)
 
-def read_graph_from_file(filename):
+def read_graph_from_file(filename, batch_size=1_000_000):
     G = nx.Graph()
+    edge_buffer = []
+
     with open(filename, 'r') as file:
-        edges = [tuple(map(int, line.strip().split())) for line in file]
-    random.shuffle(edges)
-    G.add_edges_from(edges)
+        for line in file:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                try:
+                    u, v = map(int, parts)
+                    edge_buffer.append((u, v))
+
+                    # Process in batches to limit memory
+                    if len(edge_buffer) >= batch_size:
+                        random.shuffle(edge_buffer)
+                        G.add_edges_from(edge_buffer)
+                        edge_buffer = []
+                except ValueError:
+                    continue
+
+        # Add remaining edges
+        if edge_buffer:
+            random.shuffle(edge_buffer)
+            G.add_edges_from(edge_buffer)
+
     return G
 
 if __name__ == "__main__":
