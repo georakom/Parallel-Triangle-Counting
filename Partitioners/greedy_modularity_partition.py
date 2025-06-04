@@ -14,7 +14,6 @@ def partition_graph(G, num_workers):
     """Partition using Greedy Modularity and round-robin assignment."""
     start = time.time()
     communities = list(nx.algorithms.community.greedy_modularity_communities(G))
-    print(f"Greedy Modularity took: {time.time() - start:.4f} seconds")
 
     partitions = [[] for _ in range(num_workers)]
     assignments = {}
@@ -26,4 +25,5 @@ def partition_graph(G, num_workers):
             assignments[node] = worker_id
 
     print(f"Found {len(communities)} communities, assigned to {num_workers} workers")
+    print(f"Greedy Modularity took: {time.time() - start:.4f} seconds")
     return partitions, assignments

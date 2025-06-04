@@ -95,10 +95,10 @@ def read_graph_from_file(filename, batch_size=1_000_000):
 
 if __name__ == "__main__":
     import sys
-    from Partitioners import metis_partition # Importing the partitioning algorithm to use
+    from Partitioners import hashing_metis_partition # Importing the partitioning algorithm to use
 
     filepath = "./data/"
-    filename = "amazon.txt"
+    filename = "com-youtube.ungraph.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         print(f"Number of Edges: {graph.number_of_edges()}")
 
         start_time = time.time()
-        total_triangles = parallel_triangle_count(graph, 4, metis_partition) # Deciding the partition
+        total_triangles = parallel_triangle_count(graph, 4, hashing_metis_partition) # Deciding the partition
         end_time = time.time()
 
         print(f"Total triangles: {total_triangles}")

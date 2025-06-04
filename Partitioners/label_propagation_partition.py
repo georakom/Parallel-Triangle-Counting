@@ -14,7 +14,7 @@ def partition_graph(G, num_workers):
     """Partition using Label Propagation and round-robin assignment."""
     start = time.time()
     communities = list(nx.algorithms.community.label_propagation.asyn_lpa_communities(G, seed=42))
-    print(f"Label Propagation took: {time.time() - start:.4f} seconds")
+
 
     partitions = [[] for _ in range(num_workers)]
     assignments = {}
@@ -26,4 +26,5 @@ def partition_graph(G, num_workers):
             assignments[node] = worker_id
 
     print(f"Found {len(communities)} communities, assigned to {num_workers} workers")
+    print(f"Label Propagation took: {time.time() - start:.4f} seconds")
     return partitions, assignments

@@ -18,8 +18,6 @@ def partition_graph(G, num_workers):
 
     partition = community_louvain.best_partition(G, resolution=1.0, random_state=42)
 
-    print(f"Louvain partitioning took: {time.time() - start:.4f} seconds")
-
     communities = defaultdict(list)
     for node, comm_id in partition.items():
         communities[comm_id].append(node)
@@ -40,6 +38,7 @@ def partition_graph(G, num_workers):
 
 
     print(f"Assigned {len(sorted_communities)} communities to {num_workers} workers.")
+    print(f"Louvain partitioning took: {time.time() - start:.4f} seconds")
     return partitions, assignments
 
 

@@ -1,7 +1,7 @@
 import random
 from collections import defaultdict
 import math
-
+import time
 """
 Fennel-inspired streaming partitioning.
 Balances edges and sizes with streaming assignments.
@@ -10,6 +10,7 @@ aiming to minimize a graph cut while balancing partition sizes.
 """
 
 def partition_graph(G, num_workers, alpha=1.5):
+    start = time.time()
     nodes = list(G.nodes())
     random.shuffle(nodes)
 
@@ -35,4 +36,5 @@ def partition_graph(G, num_workers, alpha=1.5):
             neighbor_counts[best_pid][v] += 1
 
     print(f"Fennel partitioning complete. Assigned {len(G)} nodes to {num_workers} partitions.")
+    print(f"Fennel took: {time.time() - start:.4f} seconds.")
     return partitions, assignments

@@ -40,5 +40,6 @@ def partition_graph_ldg(G, num_workers, capacity_factor=1.05):
         for nbr in G[u]:
             neighbor_counts[best_pid][nbr] += 1
 
-    print(f"LDG partitioning complete. Assigned {len(G)} nodes to {num_workers} partitions in {time.time() - start:.4f} seconds.")
+    print(f"LDG partitioning complete. Assigned {len(G)} nodes to {num_workers} partitions.")
+    print(f"LDG took: {time.time() - start:.4f} seconds")
     return partitions, assignments
