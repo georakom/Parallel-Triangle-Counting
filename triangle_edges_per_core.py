@@ -1,112 +1,8 @@
-import networkx as nx
-import numpy as np
-import multiprocessing as mp
-from multiprocessing import shared_memory
-from collections import defaultdict
-import random
 import time
-import os
+from shared_mem_lib import *
 
 # Shared-Memory Parallel Triangle Counting with TC-Merge and TC-Hash
 # Work between cores is split based on num_edges / cores
-
-def rank_by_degree(G):
-    nodes_sorted = sorted(G.nodes(), key=lambda x: G.degree[x])
-    rank = {node: i for i, node in enumerate(nodes_sorted)}
-    return rank
-
-
-def build_A_plus_csr(G, rank):
-    A_plus = defaultdict(list)
-    for v in G.nodes():
-        for w in G.neighbors(v):
-            if rank[v] < rank[w]:
-                A_plus[v].append(w)
-    for v in A_plus:
-        A_plus[v].sort()
-    nodes = sorted(A_plus.keys())
-    node_to_idx = {node: i for i, node in enumerate(nodes)}
-
-    indptr = [0]
-    indices = []
-    for v in nodes:
-        neighbors = A_plus[v]
-        indices.extend(neighbors)
-        indptr.append(len(indices))
-    return np.array(indptr, dtype=np.int64), np.array(indices, dtype=np.int64), nodes, node_to_idx
-
-
-def merge_intersect_count(arr1, arr2):
-    count = 0
-    i = j = 0
-    while i < len(arr1) and j < len(arr2):
-        if arr1[i] == arr2[j]:
-            count += 1
-            i += 1
-            j += 1
-        elif arr1[i] < arr2[j]:
-            i += 1
-        else:
-            j += 1
-    return count
-
-
-def hash_intersect_count(arr_small, arr_large_set):
-    return sum(1 for x in arr_small if x in arr_large_set)
-
-
-def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict):
-    pid = os.getpid()
-    print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (MERGE)")
-    shm_indptr = shared_memory.SharedMemory(name=shm_name_indptr)
-    shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
-    indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
-    indices = np.ndarray((indptr[-1],), dtype=np.int64, buffer=shm_indices.buf)
-    local_count = 0
-    for v in nodes_chunk:
-        v_idx = node_to_idx[v]
-        neighbors_v = indices[indptr[v_idx]:indptr[v_idx + 1]]
-        for w in neighbors_v:
-            if w not in node_to_idx:
-                continue
-            w_idx = node_to_idx[w]
-            neighbors_w = indices[indptr[w_idx]:indptr[w_idx + 1]]
-            local_count += merge_intersect_count(neighbors_v, neighbors_w)
-    shm_indptr.close()
-    shm_indices.close()
-
-    print(f"[Worker {pid}] FINISHED. Found {local_count} triangles.", flush=True)
-    return_dict[mp.current_process().name] = local_count
-
-
-def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict):
-    pid = os.getpid()
-    print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (HASH)")
-
-    shm_indptr = shared_memory.SharedMemory(name=shm_name_indptr)
-    shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
-    indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
-    indices = np.ndarray((indptr[-1],), dtype=np.int64, buffer=shm_indices.buf)
-    local_count = 0
-    for v in nodes_chunk:
-        v_idx = node_to_idx[v]
-        neighbors_v = indices[indptr[v_idx]:indptr[v_idx + 1]]
-        for w in neighbors_v:
-            if w not in node_to_idx:
-                continue
-            w_idx = node_to_idx[w]
-            neighbors_w = indices[indptr[w_idx]:indptr[w_idx + 1]]
-            # Use smaller array to query larger set for hashing
-            if len(neighbors_v) < len(neighbors_w):   # Can work both ways here
-                local_count += hash_intersect_count(neighbors_v, set(neighbors_w))
-            else:
-                local_count += hash_intersect_count(neighbors_w, set(neighbors_v))
-    shm_indptr.close()
-    shm_indices.close()
-
-    print(f"[Worker {pid}] FINISHED. Found {local_count} triangles.", flush=True)
-    return_dict[mp.current_process().name] = local_count
-
 
 def parallel_triangle_count(G, num_workers, method="merge"):
     rank = rank_by_degree(G)
@@ -157,34 +53,6 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     shm_indices.unlink()
 
     return total_triangles
-
-
-def read_graph_from_file(filename, batch_size=1_000_000):
-    G = nx.Graph()
-    edge_buffer = []
-
-    with open(filename, 'r') as file:
-        for line in file:
-            parts = line.strip().split()
-            if len(parts) == 2:
-                try:
-                    u, v = map(int, parts)
-                    edge_buffer.append((u, v))
-
-                    # Process in batches to limit memory
-                    if len(edge_buffer) >= batch_size:
-                        random.shuffle(edge_buffer)
-                        G.add_edges_from(edge_buffer)
-                        edge_buffer = []
-                except ValueError:
-                    continue
-
-        # Add remaining edges
-        if edge_buffer:
-            random.shuffle(edge_buffer)
-            G.add_edges_from(edge_buffer)
-
-    return G
 
 if __name__ == "__main__":
     filepath = "./data/"
