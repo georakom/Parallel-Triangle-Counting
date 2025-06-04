@@ -1,7 +1,6 @@
-import random
 from collections import defaultdict
-import math
 import time
+
 """
 Fennel-inspired streaming partitioning.
 Balances edges and sizes with streaming assignments.
@@ -11,27 +10,35 @@ aiming to minimize a graph cut while balancing partition sizes.
 
 def partition_graph(G, num_workers, alpha=1.5):
     start = time.time()
-    nodes = list(G.nodes())
-    random.shuffle(nodes)
 
-    partitions = [[] for _ in range(num_workers)]
-    assignments = {}
-    part_sizes = [0] * num_workers
-    neighbor_counts = [defaultdict(int) for _ in range(num_workers)]
+    # Prepare structures to hold partitioning results
+    partitions = [[] for _ in range(num_workers)] # Node lists per partition
+    assignments = {}                              # Node → partition ID
+    part_sizes = [0] * num_workers                # Track sizes of each partition
+    neighbor_counts = [defaultdict(int) for _ in range(num_workers)] # Neighbor presence counts per partition
 
-    for u in nodes:
+    for u in G.nodes():
         scores = []
 
         for pid in range(num_workers):
+            # Prefer partitions where many of u's neighbors are already assigned
             edge_score = sum(neighbor_counts[pid].get(v, 0) for v in G[u])
+
+            # Penalize large partitions to keep sizes balanced
             size_score = alpha * (part_sizes[pid] ** 1.5)
+
+            # Final score combines locality and load-balance
             scores.append((edge_score - size_score, pid))
 
+        # Pick the partition with the best score
         _, best_pid = max(scores)
+
+        # Assign the node
         assignments[u] = best_pid
         partitions[best_pid].append(u)
         part_sizes[best_pid] += 1
 
+        # Update neighbor counts for this partition
         for v in G[u]:
             neighbor_counts[best_pid][v] += 1
 

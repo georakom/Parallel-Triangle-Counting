@@ -13,11 +13,15 @@ and tends to form a small number of large communities, which may cause load imba
 def partition_graph(G, num_workers):
     """Partition using Greedy Modularity and round-robin assignment."""
     start = time.time()
+
+    # Detect communities
     communities = list(nx.algorithms.community.greedy_modularity_communities(G))
 
+    # Prepare empty partitions and assignment map
     partitions = [[] for _ in range(num_workers)]
     assignments = {}
 
+    # Assign each community to a worker in round-robin fashion
     for i, comm in enumerate(communities):
         worker_id = i % num_workers
         for node in comm:

@@ -1,6 +1,5 @@
 import random
 import time
-from collections import defaultdict
 
 """
 Random Partitioning with Load Balancing.
@@ -18,9 +17,6 @@ def partition_graph_random(G, num_workers, imbalance_factor=1.1):
     partitions = [[] for _ in range(num_workers)]
     assignments = {}
     worker_loads = [0] * num_workers
-
-    # Shuffle nodes for true randomness
-
 
     # Assign nodes with load balancing
     for node in G.nodes():

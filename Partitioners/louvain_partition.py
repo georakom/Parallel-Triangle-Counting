@@ -16,18 +16,22 @@ def partition_graph(G, num_workers):
     """Louvain partitioning with smart assignment of large communities."""
     start = time.time()
 
+    # Run Louvain algorithm → get node → community_id mapping
     partition = community_louvain.best_partition(G, resolution=1.0, random_state=42)
 
+    # Group nodes by community ID
     communities = defaultdict(list)
     for node, comm_id in partition.items():
         communities[comm_id].append(node)
 
+    # Sort communities by size (largest first)
     sorted_communities = sorted(communities.values(), key=len, reverse=True)
 
+    # Initialize partition containers and load tracking
     partitions = [[] for _ in range(num_workers)]
     assignments = {}
 
-    # Assign largest communities first to least-loaded worker
+    # Greedily assign the largest communities to the least-loaded worker
     worker_loads = [0] * num_workers
     for comm_nodes in sorted_communities:
         min_worker = worker_loads.index(min(worker_loads))
