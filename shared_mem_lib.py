@@ -8,29 +8,93 @@ import multiprocessing as mp
 import os
 
 def rank_by_degree(G):
-    nodes_sorted = sorted(G.nodes(), key=lambda x: G.degree[x])
-    rank = {node: i for i, node in enumerate(nodes_sorted)}
+    node_list = np.array(G.nodes(), dtype=np.int64)
+    degrees = np.array([G.degree[n] for n in node_list])
+    sorted_indices = np.argsort(degrees)  # ascending by degree
+    rank = {node: i for i, node in enumerate(node_list[sorted_indices])}
     return rank
 
 
 def build_A_plus_csr(G, rank):
-    A_plus = defaultdict(list)
-    for v in G.nodes():
+    node_list = np.array(G.nodes(), dtype=np.int64)
+    node_idx_map = {node: i for i, node in enumerate(node_list)}
+    num_nodes = len(node_list)
+
+    # Estimate upper bound on A+ edges (in worst case: all edges are A+)
+    max_edges = G.number_of_edges()
+    estimated_total = max_edges
+
+    # Preallocate large enough space; we’ll trim later
+    indices_buffer = np.empty(estimated_total * 2, dtype=np.int64)  # overallocate for safety
+    indptr = np.zeros(num_nodes + 1, dtype=np.int64)
+
+    edge_ptr = 0
+    A_plus_counts = np.zeros(num_nodes, dtype=np.int64)
+
+    for v in node_list:
+        i = node_idx_map[v]
+        count = 0
         for w in G.neighbors(v):
             if rank[v] < rank[w]:
-                A_plus[v].append(w)
-    for v in A_plus:
-        A_plus[v].sort()
-    nodes = sorted(A_plus.keys())
+                indices_buffer[edge_ptr] = w
+                edge_ptr += 1
+                count += 1
+        A_plus_counts[i] = count
+
+    # Build indptr from counts
+    np.cumsum(A_plus_counts, out=indptr[1:])
+
+    # Trim indices to actual size
+    indices = indices_buffer[:edge_ptr]
+
+    # Filter out nodes with zero A⁺ neighbors (they won’t contribute triangles)
+    non_empty = A_plus_counts > 0
+    nodes = node_list[non_empty]
     node_to_idx = {node: i for i, node in enumerate(nodes)}
 
-    indptr = [0]
-    indices = []
-    for v in nodes:
-        neighbors = A_plus[v]
-        indices.extend(neighbors)
-        indptr.append(len(indices))
-    return np.array(indptr, dtype=np.int64), np.array(indices, dtype=np.int64), nodes, node_to_idx
+    # Rebuild compacted indptr/indices for only these nodes
+    new_indptr = [0]
+    new_indices = []
+
+    for node in nodes:
+        i = node_idx_map[node]
+        start = indptr[i]
+        end = indptr[i + 1]
+        neighbors = np.sort(indices[start:end])  # Still sort for merge
+        new_indices.extend(neighbors)
+        new_indptr.append(len(new_indices))
+
+    return (
+        np.array(new_indptr, dtype=np.int64),
+        np.array(new_indices, dtype=np.int64),
+        list(nodes),
+        node_to_idx,
+    )
+# STALLING THESE TWO FUNCTIONS FOR NOW!!!!!!!!!!!!!!!!!!!!!!!
+# def rank_by_degree(G):
+#     nodes_sorted = sorted(G.nodes(), key=lambda x: G.degree[x])
+#     rank = {node: i for i, node in enumerate(nodes_sorted)}
+#     return rank
+#
+#
+# def build_A_plus_csr(G, rank):
+#     A_plus = defaultdict(list)
+#     for v in G.nodes():
+#         for w in G.neighbors(v):
+#             if rank[v] < rank[w]:
+#                 A_plus[v].append(w)
+#     for v in A_plus:
+#         A_plus[v] = np.sort(A_plus[v])
+#     nodes = sorted(A_plus.keys())
+#     node_to_idx = {node: i for i, node in enumerate(nodes)}
+#
+#     indptr = [0]
+#     indices = []
+#     for v in nodes:
+#         neighbors = A_plus[v]
+#         indices.extend(neighbors)
+#         indptr.append(len(indices))
+#     return np.array(indptr, dtype=np.int64), np.array(indices, dtype=np.int64), nodes, node_to_idx
 
 
 def merge_intersect_count(arr1, arr2):
