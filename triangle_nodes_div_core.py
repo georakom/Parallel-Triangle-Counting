@@ -5,25 +5,34 @@ from shared_mem_lib import *
 # Work between cores is split based on num_edges / cores
 
 def parallel_triangle_count(G, num_workers, method="merge"):
+    total_start = time.time() # TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    preprocess_start = time.time() # TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     # Ranking by degree and building A+
     rank = rank_by_degree(G)
     indptr, indices, nodes, node_to_idx = build_A_plus_csr(G, rank)
+    print(f"[TIME] Preprocessing (ranking + A+): {time.time() - preprocess_start:.4f} sec") # TEST!!!!!!!!!!!!!!!!
 
     # Set up shared memory for CSR arrays
+    shm_start = time.time() # TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     shm_indptr = shared_memory.SharedMemory(create=True, size=indptr.nbytes)
     shm_indices = shared_memory.SharedMemory(create=True, size=indices.nbytes)
     shm_indptr_buf = np.ndarray(indptr.shape, dtype=indptr.dtype, buffer=shm_indptr.buf)
     shm_indices_buf = np.ndarray(indices.shape, dtype=indices.dtype, buffer=shm_indices.buf)
     shm_indptr_buf[:] = indptr[:]
     shm_indices_buf[:] = indices[:]
+    print(f"[TIME] Shared memory setup: {time.time() - shm_start:.4f} sec") # TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+    manager_start = time.time()
     manager = mp.Manager()
     return_dict = manager.dict()
+    print(f"[TIME] Manager init: {time.time() - manager_start:.4f} sec") # TEST!!!!!!!!!!!!!!!!!!!!!!!!!
     processes = []
 
     # Each node's weight = length of its A⁺ set (i.e., indptr[i+1] - indptr[i])
+    bucketing_start = time.time()  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
     weights.sort(key=lambda x: x[1], reverse=True)  # Sort nodes by descending work
+
 
     # Initialize empty buckets for each core
     buckets = [[] for _ in range(num_workers)]
@@ -34,7 +43,9 @@ def parallel_triangle_count(G, num_workers, method="merge"):
         min_idx = bucket_sums.index(min(bucket_sums))
         buckets[min_idx].append(node)
         bucket_sums[min_idx] += weight
+    print(f"[TIME] Bucketing: {time.time() - bucketing_start:.4f} sec")  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+    spawn_start = time.time()  # HTESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
     # Spawn one process per bucket
     for i in range(num_workers):
         nodes_chunk = buckets[i]
@@ -50,18 +61,26 @@ def parallel_triangle_count(G, num_workers, method="merge"):
             raise ValueError("Method must be 'merge' or 'hash'")
         processes.append(p)
         p.start()
+    print(f"[TIME] Process spawning: {time.time() - spawn_start:.4f} sec")  # HTESTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
 
+    join_start = time.time()  # TESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
     for p in processes:
         p.join()
+    print(f"[TIME] Join phase: {time.time() - join_start:.4f} sec")  # TESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
 
+    aggregation_start = time.time()  # TESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
     total_triangles = sum(return_dict.values())
+    print(f"[TIME] Aggregating results: {time.time() - aggregation_start:.4f} sec")  # TESTTTTTTTTTTTTTTTT
 
     # Cleanup shared memory
+    cleanup_start = time.time()  # TESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
     shm_indptr.close()
     shm_indptr.unlink()
     shm_indices.close()
     shm_indices.unlink()
+    print(f"[TIME] Shared memory cleanup: {time.time() - cleanup_start:.4f} sec")  # TESTTTTTTTTTTTTTTTTTTTT
 
+    print(f"[TIME] Total pipeline: {time.time() - total_start:.4f} sec")  # TESTTTTTTTTTTTTTTTTTTTTTTTTTTT
     return total_triangles
 
 if __name__ == "__main__":
