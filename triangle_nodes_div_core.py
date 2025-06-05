@@ -30,19 +30,27 @@ def parallel_triangle_count(G, num_workers, method="merge"):
 
     # Each node's weight = length of its A⁺ set (i.e., indptr[i+1] - indptr[i])
     bucketing_start = time.time()  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
-    weights.sort(key=lambda x: x[1], reverse=True)  # Sort nodes by descending work
+    if num_workers <= 32: #TESTING THAT CAN BE DELETED AFTER WARDS
+        weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
+        weights.sort(key=lambda x: x[1], reverse=True)  # Sort nodes by descending work
 
 
-    # Initialize empty buckets for each core
-    buckets = [[] for _ in range(num_workers)]
-    bucket_sums = [0] * num_workers  # Keep track of total work per bucket
+        # Initialize empty buckets for each core
+        buckets = [[] for _ in range(num_workers)]
+        bucket_sums = [0] * num_workers  # Keep track of total work per bucket
 
-    for node, weight in weights:
-        # Greedily assign to the bucket with the least current total weight
-        min_idx = bucket_sums.index(min(bucket_sums))
-        buckets[min_idx].append(node)
-        bucket_sums[min_idx] += weight
+        for node, weight in weights:
+            # Greedily assign to the bucket with the least current total weight
+            min_idx = bucket_sums.index(min(bucket_sums))
+            buckets[min_idx].append(node)
+            bucket_sums[min_idx] += weight
+    else:
+        # Simple uniform splitting to avoid overhead
+        chunk_size = len(nodes) // num_workers
+        buckets = [nodes[i * chunk_size: (i + 1) * chunk_size] for i in range(num_workers)]
+        remainder = len(nodes) % num_workers
+        for i in range(remainder):
+            buckets[i].append(nodes[-(i + 1)])  # spread leftover nodes
     print(f"[TIME] Bucketing: {time.time() - bucketing_start:.4f} sec")  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     spawn_start = time.time()  # HTESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT

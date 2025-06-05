@@ -142,7 +142,7 @@ def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_t
 def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (HASH)")
-
+    tri_time = time.time()
     shm_indptr = shared_memory.SharedMemory(name=shm_name_indptr)
     shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
     indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
@@ -164,7 +164,7 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
     shm_indptr.close()
     shm_indices.close()
 
-    print(f"[Worker {pid}] FINISHED. Found {local_count} triangles.", flush=True)
+    print(f"[Worker {pid}] FINISHED. Found {local_count} triangles in {time.time() - tri_time:.4f} secs.", flush=True)
     return_dict[mp.current_process().name] = local_count
 
 def worker_wrapper(method, shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict, sem):
