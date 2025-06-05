@@ -1,5 +1,6 @@
 import time
 from shared_mem_lib import *
+import heapq
 
 # Shared-Memory Parallel Triangle Counting with TC-Merge and TC-Hash
 # Work between cores is split based on num_edges / cores
@@ -28,29 +29,37 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     print(f"[TIME] Manager init: {time.time() - manager_start:.4f} sec") # TEST!!!!!!!!!!!!!!!!!!!!!!!!!
     processes = []
 
-    # Each node's weight = length of its A⁺ set (i.e., indptr[i+1] - indptr[i])
     bucketing_start = time.time()  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if num_workers <= 32: #TESTING THAT CAN BE DELETED AFTER WARDS
-        weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
-        weights.sort(key=lambda x: x[1], reverse=True)  # Sort nodes by descending work
 
+    # Each node's work = len(A⁺), i.e. indptr[i+1] - indptr[i]
+    weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
+    weights.sort(key=lambda x: x[1], reverse=True)  # High-work nodes first
 
-        # Initialize empty buckets for each core
-        buckets = [[] for _ in range(num_workers)]
-        bucket_sums = [0] * num_workers  # Keep track of total work per bucket
+    # Min-heap (workload_sum, core_index)
+    buckets = [[] for _ in range(num_workers)]
+    heap = [(0, i) for i in range(num_workers)]  # (current_work_sum, core_id)
+    heapq.heapify(heap)
 
-        for node, weight in weights:
-            # Greedily assign to the bucket with the least current total weight
-            min_idx = bucket_sums.index(min(bucket_sums))
-            buckets[min_idx].append(node)
-            bucket_sums[min_idx] += weight
-    else:
-        # Simple uniform splitting to avoid overhead
-        chunk_size = len(nodes) // num_workers
-        buckets = [nodes[i * chunk_size: (i + 1) * chunk_size] for i in range(num_workers)]
-        remainder = len(nodes) % num_workers
-        for i in range(remainder):
-            buckets[i].append(nodes[-(i + 1)])  # spread leftover nodes
+    for node, weight in weights:
+        curr_sum, core_id = heapq.heappop(heap)
+        buckets[core_id].append(node)
+        heapq.heappush(heap, (curr_sum + weight, core_id))
+    # COMMENTING THIS SECTION TO TEST HEAP
+    # Each node's weight = length of its A⁺ set (i.e., indptr[i+1] - indptr[i])
+    # weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
+    # weights.sort(key=lambda x: x[1], reverse=True)  # Sort nodes by descending work
+    #
+    #
+    # # Initialize empty buckets for each core
+    # buckets = [[] for _ in range(num_workers)]
+    # bucket_sums = [0] * num_workers  # Keep track of total work per bucket
+    #
+    # for node, weight in weights:
+    #     # Greedily assign to the bucket with the least current total weight
+    #     min_idx = bucket_sums.index(min(bucket_sums))
+    #     buckets[min_idx].append(node)
+    #     bucket_sums[min_idx] += weight
+    # COMMENTING THIS SECTION TO TEST HEAP
     print(f"[TIME] Bucketing: {time.time() - bucketing_start:.4f} sec")  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     spawn_start = time.time()  # HTESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
