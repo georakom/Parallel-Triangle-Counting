@@ -1,9 +1,8 @@
-import time
 from shared_mem_lib import *
 import heapq
 
 # Shared-Memory Parallel Triangle Counting with TC-Merge and TC-Hash
-# Work between cores is split based on num_edges / cores
+# Work between cores is split based on A+ weight
 
 def parallel_triangle_count(G, num_workers, method="merge"):
     total_start = time.time() # TEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -31,35 +30,23 @@ def parallel_triangle_count(G, num_workers, method="merge"):
 
     bucketing_start = time.time()  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    # Each node's work = len(A⁺), i.e. indptr[i+1] - indptr[i]
+    # Estimate "work" for each node
+    # Each node's work = len(A⁺)
     weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
+
+    # Sort by heaviest first (LPT first based)
     weights.sort(key=lambda x: x[1], reverse=True)  # High-work nodes first
 
-    # Min-heap (workload_sum, core_index)
+    # Min-heap (workload_sum, core_index), stores current load per core
     buckets = [[] for _ in range(num_workers)]
     heap = [(0, i) for i in range(num_workers)]  # (current_work_sum, core_id)
     heapq.heapify(heap)
 
+    # Assign each node to the least loaded core
     for node, weight in weights:
         curr_sum, core_id = heapq.heappop(heap)
         buckets[core_id].append(node)
         heapq.heappush(heap, (curr_sum + weight, core_id))
-    # COMMENTING THIS SECTION TO TEST HEAP
-    # Each node's weight = length of its A⁺ set (i.e., indptr[i+1] - indptr[i])
-    # weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
-    # weights.sort(key=lambda x: x[1], reverse=True)  # Sort nodes by descending work
-    #
-    #
-    # # Initialize empty buckets for each core
-    # buckets = [[] for _ in range(num_workers)]
-    # bucket_sums = [0] * num_workers  # Keep track of total work per bucket
-    #
-    # for node, weight in weights:
-    #     # Greedily assign to the bucket with the least current total weight
-    #     min_idx = bucket_sums.index(min(bucket_sums))
-    #     buckets[min_idx].append(node)
-    #     bucket_sums[min_idx] += weight
-    # COMMENTING THIS SECTION TO TEST HEAP
     print(f"[TIME] Bucketing: {time.time() - bucketing_start:.4f} sec")  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     spawn_start = time.time()  # HTESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT

@@ -1,10 +1,10 @@
-import time
 from shared_mem_lib import *
 
 # Shared-Memory Parallel Triangle Counting is implemented with TC-Merge and TC-Hash
 # Work between cores is split based on a specific number (for example 5000 edges) for a better balance
 
 def parallel_triangle_count(G, num_workers, method="merge", chunk_size=50000):
+    # Ranking by degree and building A+
     rank = rank_by_degree(G)
     indptr, indices, nodes, node_to_idx = build_A_plus_csr(G, rank)
 
@@ -41,40 +41,13 @@ def parallel_triangle_count(G, num_workers, method="merge", chunk_size=50000):
 
     total_triangles = sum(return_dict.values())
 
+    # Clean up shared memory
     shm_indptr.close()
     shm_indptr.unlink()
     shm_indices.close()
     shm_indices.unlink()
 
     return total_triangles
-
-def read_graph_from_file(filename, batch_size=1_000_000):
-    G = nx.Graph()
-    edge_buffer = []
-
-    with open(filename, 'r') as file:
-        for line in file:
-            parts = line.strip().split()
-            if len(parts) == 2:
-                try:
-                    u, v = map(int, parts)
-                    edge_buffer.append((u, v))
-
-                    # Process in batches to limit memory
-                    if len(edge_buffer) >= batch_size:
-                        random.shuffle(edge_buffer)
-                        G.add_edges_from(edge_buffer)
-                        edge_buffer = []
-                except ValueError:
-                    continue
-
-        # Add remaining edges
-        if edge_buffer:
-            random.shuffle(edge_buffer)
-            G.add_edges_from(edge_buffer)
-
-    return G
-
 
 if __name__ == "__main__":
     filepath = "./data/"

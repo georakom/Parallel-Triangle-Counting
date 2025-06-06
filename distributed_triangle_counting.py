@@ -94,7 +94,6 @@ def read_graph_from_file(filename, batch_size=1_000_000):
     return G
 
 if __name__ == "__main__":
-    import sys
     from Partitioners import hashing_metis_partition # Importing the partitioning algorithm to use
 
     filepath = "./data/"

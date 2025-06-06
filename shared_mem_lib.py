@@ -1,12 +1,12 @@
 import time
 import networkx as nx
-from collections import defaultdict
 import numpy as np
 import random
 from multiprocessing import shared_memory
 import multiprocessing as mp
 import os
 
+# Assigns a total order (ranking) to nodes based on degree to build the A+ representation
 def rank_by_degree(G):
     node_list = np.array(G.nodes(), dtype=np.int64)
     degrees = np.array([G.degree[n] for n in node_list])
@@ -14,23 +14,20 @@ def rank_by_degree(G):
     rank = {node: i for i, node in enumerate(node_list[sorted_indices])}
     return rank
 
-
+# Builds the A+ CSR (Compressed Sparse Row) structure for efficient triangle counting
 def build_A_plus_csr(G, rank):
     node_list = np.array(G.nodes(), dtype=np.int64)
     node_idx_map = {node: i for i, node in enumerate(node_list)}
     num_nodes = len(node_list)
 
-    # Estimate upper bound on A+ edges (in worst case: all edges are A+)
-    max_edges = G.number_of_edges()
-    estimated_total = max_edges
-
     # Preallocate large enough space; we’ll trim later
-    indices_buffer = np.empty(estimated_total * 2, dtype=np.int64)  # overallocate for safety
+    indices_buffer = np.empty(G.number_of_edges(), dtype=np.int64)  # overallocate for safety CHANGED IT TO TEST
     indptr = np.zeros(num_nodes + 1, dtype=np.int64)
 
     edge_ptr = 0
     A_plus_counts = np.zeros(num_nodes, dtype=np.int64)
 
+    # Fill A+ structure: only store neighbors with higher rank
     for v in node_list:
         i = node_idx_map[v]
         count = 0
@@ -70,33 +67,8 @@ def build_A_plus_csr(G, rank):
         list(nodes),
         node_to_idx,
     )
-# STALLING THESE TWO FUNCTIONS FOR NOW!!!!!!!!!!!!!!!!!!!!!!!
-# def rank_by_degree(G):
-#     nodes_sorted = sorted(G.nodes(), key=lambda x: G.degree[x])
-#     rank = {node: i for i, node in enumerate(nodes_sorted)}
-#     return rank
-#
-#
-# def build_A_plus_csr(G, rank):
-#     A_plus = defaultdict(list)
-#     for v in G.nodes():
-#         for w in G.neighbors(v):
-#             if rank[v] < rank[w]:
-#                 A_plus[v].append(w)
-#     for v in A_plus:
-#         A_plus[v] = np.sort(A_plus[v])
-#     nodes = sorted(A_plus.keys())
-#     node_to_idx = {node: i for i, node in enumerate(nodes)}
-#
-#     indptr = [0]
-#     indices = []
-#     for v in nodes:
-#         neighbors = A_plus[v]
-#         indices.extend(neighbors)
-#         indptr.append(len(indices))
-#     return np.array(indptr, dtype=np.int64), np.array(indices, dtype=np.int64), nodes, node_to_idx
 
-
+# Intersect two sorted arrays (neighbors) using the merge-based approach
 def merge_intersect_count(arr1, arr2):
     count = 0
     i = j = 0
@@ -111,19 +83,22 @@ def merge_intersect_count(arr1, arr2):
             j += 1
     return count
 
-
+# Intersect two neighbor arrays using hash-based lookup
 def hash_intersect_count(arr_small, arr_large_set):
-    return sum(1 for x in arr_small if x in arr_large_set)
+    return sum(1 for x in arr_small if x in arr_large_set) # One side is converted to a set; the other is scanned
 
-
+# Worker for merge-based triangle counting
 def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (MERGE)")
     tri_time = time.time()
+
+    # Reconnect to shared memory
     shm_indptr = shared_memory.SharedMemory(name=shm_name_indptr)
     shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
     indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
     indices = np.ndarray((indptr[-1],), dtype=np.int64, buffer=shm_indices.buf)
+
     local_count = 0
     for v in nodes_chunk:
         v_idx = node_to_idx[v]
@@ -139,14 +114,17 @@ def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_t
     print(f"[Worker {pid}] FINISHED. Found {local_count} triangles, in {time.time() - tri_time:.4f} secs", flush=True)
     return_dict[mp.current_process().name] = local_count
 
+# Worker for hash-based triangle counting
 def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (HASH)")
     tri_time = time.time()
+
     shm_indptr = shared_memory.SharedMemory(name=shm_name_indptr)
     shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
     indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
     indices = np.ndarray((indptr[-1],), dtype=np.int64, buffer=shm_indices.buf)
+
     local_count = 0
     for v in nodes_chunk:
         v_idx = node_to_idx[v]
@@ -156,7 +134,8 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
                 continue
             w_idx = node_to_idx[w]
             neighbors_w = indices[indptr[w_idx]:indptr[w_idx + 1]]
-            # Use smaller array to query larger set for hashing
+
+            # Pick smaller list to probe through larger set
             if len(neighbors_v) < len(neighbors_w):
                 local_count += hash_intersect_count(neighbors_v, set(neighbors_w))
             else:
@@ -167,6 +146,7 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
     print(f"[Worker {pid}] FINISHED. Found {local_count} triangles in {time.time() - tri_time:.4f} secs.", flush=True)
     return_dict[mp.current_process().name] = local_count
 
+# Wrapper to allow releasing semaphore after work finishes
 def worker_wrapper(method, shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict, sem):
     try:
         if method == "merge":
