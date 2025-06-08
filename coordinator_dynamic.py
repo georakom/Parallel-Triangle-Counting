@@ -96,8 +96,11 @@ def coordinator(graph, num_workers, task_queue, result_queues):
             pending_requests.remove(best_worker)
 
             remaining_cost = compute_total_cost(second_half[ptr:], graph)
-            target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (num_workers * k)))
-            k *= 0.5
+            # Comments to test
+            #target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (num_workers * k)))
+            #k *= 0.5
+            effective_workers = max(1, num_workers - 1)
+            target_cost = max(MIN_CHUNK_COST, int(remaining_cost / effective_workers))
 
             chunk, cost = [], 0
             while ptr < len(second_half) and cost < target_cost:
