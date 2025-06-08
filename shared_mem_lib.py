@@ -120,6 +120,7 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (HASH)")
     tri_time = time.time()
 
+    # Reconnect to shared memory
     shm_indptr = shared_memory.SharedMemory(name=shm_name_indptr)
     shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
     indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
