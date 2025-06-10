@@ -30,8 +30,7 @@ def parallel_triangle_count(G, num_workers, method="merge"):
 
     bucketing_start = time.time()  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    # Estimate "work" for each node
-    # Each node's work = len(A⁺)
+    # Estimate work for each node
     weights = [(node, indptr[i + 1] - indptr[i]) for i, node in enumerate(nodes)]
 
     # Sort by heaviest first (LPT first based)
@@ -50,7 +49,7 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     print(f"[TIME] Bucketing: {time.time() - bucketing_start:.4f} sec")  # HTEST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     spawn_start = time.time()  # HTESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
-    # Spawn one process per bucket
+
     for i in range(num_workers):
         nodes_chunk = buckets[i]
         if method == "merge":

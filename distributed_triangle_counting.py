@@ -94,21 +94,21 @@ def read_graph_from_file(filename, batch_size=1_000_000):
     return G
 
 if __name__ == "__main__":
-    from Partitioners import hashing_metis_partition # Importing the partitioning algorithm to use
+    from Partitioners import random_partition # Importing the partitioning algorithm to use
 
     filepath = "./data/"
-    filename = "com-youtube.ungraph.txt"
+    filename = "amazon.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
 
-        avg_degree = sum(dict(graph.degree()).values()) / graph.number_of_nodes()
-        print(f"Average degree of the graph: {avg_degree:.2f}")
-        print(f"Number of Nodes: {graph.number_of_nodes()}")
-        print(f"Number of Edges: {graph.number_of_edges()}")
+        # avg_degree = sum(dict(graph.degree()).values()) / graph.number_of_nodes()
+        # print(f"Average degree of the graph: {avg_degree:.2f}")
+        #print(f"Number of Nodes: {graph.number_of_nodes()}")
+        #print(f"Number of Edges: {graph.number_of_edges()}")
 
         start_time = time.time()
-        total_triangles = parallel_triangle_count(graph, 4, hashing_metis_partition) # Deciding the partition
+        total_triangles = parallel_triangle_count(graph, 8, random_partition) # Deciding the partition
         end_time = time.time()
 
         print(f"Total triangles: {total_triangles}")

@@ -16,12 +16,13 @@ def rank_by_degree(G):
 
 # Builds the A+ CSR (Compressed Sparse Row) structure for efficient triangle counting
 def build_A_plus_csr(G, rank):
+    # Build NumPy node list and dictionary for the index position
     node_list = np.array(G.nodes(), dtype=np.int64)
     node_idx_map = {node: i for i, node in enumerate(node_list)}
     num_nodes = len(node_list)
 
-    # Preallocate large enough space; we’ll trim later
-    indices_buffer = np.empty(G.number_of_edges(), dtype=np.int64)  # overallocate for safety CHANGED IT TO TEST
+    # Preallocate large enough space
+    indices_buffer = np.empty(G.number_of_edges(), dtype=np.int64)
     indptr = np.zeros(num_nodes + 1, dtype=np.int64)
 
     edge_ptr = 0
@@ -62,10 +63,8 @@ def build_A_plus_csr(G, rank):
         new_indptr.append(len(new_indices))
 
     return (
-        np.array(new_indptr, dtype=np.int64),
-        np.array(new_indices, dtype=np.int64),
-        list(nodes),
-        node_to_idx,
+        np.array(new_indptr, dtype=np.int64), np.array(new_indices, dtype=np.int64),
+        list(nodes), node_to_idx
     )
 
 # Intersect two sorted arrays (neighbors) using the merge-based approach
@@ -146,18 +145,6 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
 
     print(f"[Worker {pid}] FINISHED. Found {local_count} triangles in {time.time() - tri_time:.4f} secs.", flush=True)
     return_dict[mp.current_process().name] = local_count
-
-# Wrapper to allow releasing semaphore after work finishes
-def worker_wrapper(method, shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict, sem):
-    try:
-        if method == "merge":
-            worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict)
-        elif method == "hash":
-            worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict)
-        else:
-            raise ValueError("Invalid method")
-    finally:
-        sem.release()
 
 def read_graph_from_file(filename, batch_size=1_000_000):
     G = nx.Graph()
