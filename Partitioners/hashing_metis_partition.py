@@ -9,7 +9,7 @@ Partition the graph using a hybrid strategy:
 This approach balances partition quality with speed and is much faster than full-METIS while retaining structure.
 """
 
-def improved_hybrid_metis_partition(G, num_workers, degree_cutoff=70):
+def improved_hybrid_metis_partition(G, num_workers, degree_cutoff=100):
     start_time = time.time()
 
     # Identify high-degree nodes based on cutoff

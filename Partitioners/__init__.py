@@ -6,6 +6,6 @@ from .fennel_partition import partition_graph as fennel_partition
 from .ldg_partition import partition_graph_ldg as ldg_partition
 from .hashing_partition import partition_graph_hash as hashing_partition
 from .degree_partition import partition_graph_degree as degree_partition
-from .hybrid_partition import partition_graph_hybrid as hybrid_partition
+from .hashing_degree_partition import partition_graph_hybrid as hashing_degree_partition
 from .hashing_metis_partition import improved_hybrid_metis_partition as hashing_metis_partition
 from .random_partition import partition_graph_random as random_partition

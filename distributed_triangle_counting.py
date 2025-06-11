@@ -7,25 +7,36 @@ import psutil
 import os
 
 def extract_all_worker_data(G, partitions, assignments, num_workers):
+    # Initialize storage per worker
     worker_edges = [set() for _ in range(num_workers)]
     worker_nodes_used = [set() for _ in range(num_workers)]
 
+    # Track which workers need each node
+    node_to_workers = defaultdict(set)
+
+    # Pass 1: assign directed edge (u → v) to master of u, and update who uses what
     for u, v in G.edges():
         if u > v:
-            u, v = v, u
+            u, v = v, u  # enforce direction u → v
+
         worker_id = assignments[u]
         worker_edges[worker_id].add((u, v))
         worker_nodes_used[worker_id].update([u, v])
+        node_to_workers[u].add(worker_id)
+        node_to_workers[v].add(worker_id)
 
-    all_edges = list(G.edges())
+    # Inline proxy edge insertion without looping all edges again
+    for u, v in G.edges():
+        if u > v:
+            u, v = v, u
+
+        shared_workers = node_to_workers[u] & node_to_workers[v]
+        for wid in shared_workers:
+            worker_edges[wid].add((u, v))
+
+    # Final prep
     worker_data = []
     for worker_id in range(num_workers):
-        local_nodes = worker_nodes_used[worker_id]
-        for u, v in all_edges:
-            if u in local_nodes and v in local_nodes:
-                if u > v:
-                    u, v = v, u
-                worker_edges[worker_id].add((u, v))
         masters = set(partitions[worker_id])
         used_nodes = {u for edge in worker_edges[worker_id] for u in edge}
         mirrors = used_nodes - masters
@@ -94,7 +105,7 @@ def read_graph_from_file(filename, batch_size=1_000_000):
     return G
 
 if __name__ == "__main__":
-    from Partitioners import random_partition # Importing the partitioning algorithm to use
+    import Partitioners as p # Importing the partitioning algorithm to use
 
     filepath = "./data/"
     filename = "amazon.txt"
@@ -108,7 +119,7 @@ if __name__ == "__main__":
         #print(f"Number of Edges: {graph.number_of_edges()}")
 
         start_time = time.time()
-        total_triangles = parallel_triangle_count(graph, 8, random_partition) # Deciding the partition
+        total_triangles = parallel_triangle_count(graph, 4, p.metis_partition) # Deciding the partition
         end_time = time.time()
 
         print(f"Total triangles: {total_triangles}")
