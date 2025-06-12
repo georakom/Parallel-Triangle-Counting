@@ -2,6 +2,7 @@ import networkx as nx
 import multiprocessing as mp
 import time
 import random
+import queue
 
 def compute_local_triangles(shared_neighbors, nodes):
     triangle_count = 0
@@ -39,27 +40,26 @@ def compute_total_cost(nodes, G):
 def coordinator(graph, num_workers, task_queue, result_queues):
     init_time = time.time()
 
-    # Sort nodes for deterministic partitioning
+    # ---- Initial Preparation ----
+    # Deterministically sort nodes
     nodes_sorted = sorted(graph.nodes())
 
-    # Split work into two phases by cost (degree sum)
-    total_cost = compute_total_cost(graph.nodes(), graph)
+    total_cost = compute_total_cost(nodes_sorted, graph)
     half_cost = total_cost // 2
 
     first_half = []
-    first_half_cost = 0
+    cost_so_far = 0
     for node in nodes_sorted:
-        cost = graph.degree(node)
-        if first_half_cost + cost <= half_cost:
+        node_cost = graph.degree(node)
+        if cost_so_far + node_cost <= half_cost:
             first_half.append(node)
-            first_half_cost += cost
+            cost_so_far += node_cost
         else:
             break
 
-    second_half_start_idx = len(first_half)
-    second_half = list(nodes_sorted)[second_half_start_idx:]
+    second_half = nodes_sorted[len(first_half):]
 
-    # INITIAL WORK: Evenly split first half
+    # ---- Assign Initial Chunks (First Half) ----
     chunks = [[] for _ in range(num_workers)]
     costs = [0] * num_workers
     for node in first_half:
@@ -70,19 +70,54 @@ def coordinator(graph, num_workers, task_queue, result_queues):
     for i in range(num_workers):
         result_queues[i].put(("chunk", chunks[i]))
         print(f"Coordinator initially assigned {len(chunks[i])} nodes (cost={compute_total_cost(chunks[i], graph)}) to worker {i}", flush=True)
+
     print(f"Initialization time: {time.time() - init_time:.4f} seconds")
 
-    ptr = 0
+    # ---- Coordinator Runtime State ----
+    ptr = 0  # Pointer into second_half
     k = 1.0
-    worker_costs = costs.copy()  # Already did first-half work
+    worker_costs = costs.copy()
     workers_sent_stop = set()
-    workers_reported_done = set()
+    workers_done = set()
     triangle_counts = [0] * num_workers
-    MIN_CHUNK_NODES = 50000
-    MIN_CHUNK_COST = 1000000
     pending_requests = []
 
-    while len(workers_reported_done) < num_workers:
+    MIN_CHUNK_NODES = 50000
+    MIN_CHUNK_COST = 2000000
+    ready_chunks = queue.Queue(maxsize=2 * num_workers)  # Pre-buffered chunks
+
+    def prepare_next_chunk():
+        """Prepare a chunk from the second_half and enqueue it for later dispatch."""
+        nonlocal ptr, k
+
+        if ptr >= len(second_half):
+            return False  # All work done
+
+        remaining_cost = compute_total_cost(second_half[ptr:], graph)
+        target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (num_workers * k)))
+        k *= 1.2
+
+        chunk, cost = [], 0
+        while ptr < len(second_half) and cost < target_cost:
+            node = second_half[ptr]
+            chunk.append(node)
+            cost += graph.degree(node)
+            ptr += 1
+
+        # If close to end, flush remaining
+        if len(second_half) - ptr < MIN_CHUNK_NODES:
+            while ptr < len(second_half):
+                node = second_half[ptr]
+                chunk.append(node)
+                cost += graph.degree(node)
+                ptr += 1
+
+        ready_chunks.put((chunk, cost))
+        return True
+
+    # ---- Main Loop ----
+    while len(workers_done) < num_workers:
+        # --- Respond to worker messages ---
         while not task_queue.empty():
             msg_type, *data = task_queue.get()
             if msg_type == "request_chunk":
@@ -92,49 +127,38 @@ def coordinator(graph, num_workers, task_queue, result_queues):
                 triangle_counts[worker_id] += count
             elif msg_type == "done":
                 worker_id = data[0]
-                workers_reported_done.add(worker_id)
+                workers_done.add(worker_id)
 
-        if pending_requests and ptr < len(second_half):
-            # Choose the least-loaded worker from pending
-            best_worker = min(pending_requests, key=lambda wid: worker_costs[wid])
-            pending_requests.remove(best_worker)
+        # --- Dispatch precomputed chunks ---
+        while pending_requests and not ready_chunks.empty():
+            worker_id = pending_requests.pop(0)
+            chunk, cost = ready_chunks.get()
+            result_queues[worker_id].put(("chunk", chunk))
+            worker_costs[worker_id] += cost
+            print(f"Coordinator assigned {len(chunk)} nodes (cost={cost}) to worker {worker_id}", flush=True)
 
-            remaining_cost = compute_total_cost(second_half[ptr:], graph)
-            # Comments to test
-            target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (num_workers * k)))
-            k *= 1.5
+        # --- Prepare new chunks if buffer not full ---
+        if ptr < len(second_half) and not ready_chunks.full():
+            prepare_next_chunk()
 
-            chunk, cost = [], 0
-            while ptr < len(second_half) and cost < target_cost:
-                node = second_half[ptr]
-                chunk.append(node)
-                cost += graph.degree(node)
-                ptr += 1
-
-            if len(second_half) - ptr < MIN_CHUNK_NODES:
-                while ptr < len(second_half):
-                    node = second_half[ptr]
-                    chunk.append(node)
-                    cost += graph.degree(node)
-                    ptr += 1
-
-            result_queues[best_worker].put(("chunk", chunk))
-            worker_costs[best_worker] += cost
-            print(f"Coordinator assigned {len(chunk)} nodes (cost={cost}) to worker {best_worker}", flush=True)
-
-        # If no work remains, send "stop" to anyone still requesting
-        if ptr >= len(second_half) and pending_requests:
-            for wid in pending_requests:
-                if wid not in workers_sent_stop:
-                    result_queues[wid].put(("stop", None))
-                    workers_sent_stop.add(wid)
+        # --- If no work remains, send "stop" to all pending workers ---
+        if ptr >= len(second_half) and ready_chunks.empty() and pending_requests:
+            for worker_id in pending_requests:
+                if worker_id not in workers_sent_stop:
+                    result_queues[worker_id].put(("stop", None))
+                    workers_sent_stop.add(worker_id)
             pending_requests.clear()
 
+        # Sleep briefly to yield control and reduce busy waiting
+        time.sleep(0.001)
+
+    # ---- Final Reporting ----
     print("\nTriangles per worker:")
     for i, count in enumerate(triangle_counts):
         print(f"  Worker {i}: {count}")
     total = sum(triangle_counts)
     print(f"\nTotal triangles: {total}")
+
 
 def read_graph_from_file(filename, batch_size=1_000_000):
     G = nx.Graph()
@@ -165,13 +189,13 @@ def read_graph_from_file(filename, batch_size=1_000_000):
 
 
 if __name__ == "__main__":
-    filepath = "./data/"
-    filename = "com-youtube.ungraph.txt"
+    filepath = "/data/delab/georakom/"
+    filename = "com-lj.ungraph.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename )
 
-        num_workers = 3
+        num_workers = 32
 
         # Use mp.Queue (faster) and no manager at all
         task_queue = mp.Queue()
