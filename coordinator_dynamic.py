@@ -69,11 +69,19 @@ def coordinator(graph, num_workers, task_queue, result_queues):
     # target_cost = max(1_000_000, min(6_000_000, int(avg_deg * 50)))  # ≈ 50 nodes worth
 
     degrees_list = [graph.degree(n) for n in nodes_sorted]
-    median_deg = int(np.median(degrees_list))
-    avg_deg = total_cost / len(nodes_sorted)
+    p75 = np.percentile(degrees_list, 75)  # upper-middle
+    p90 = np.percentile(degrees_list, 90)  # skew detection
+    median_deg = np.median(degrees_list)
 
-    # Pick a cost between avg and median-derived heuristics
-    target_cost = max(1_000_000, min(6_000_000, int(max(avg_deg * 40, median_deg * 100))))
+    # Adaptive chunk cost
+    if p90 > 3 * median_deg:
+        # Skewed graph (long tail): use larger chunks
+        target_cost = int(median_deg * 80 + p75 * 20)
+    else:
+        # Uniform-ish: safe average
+        target_cost = int(median_deg * 100)
+
+    target_cost = max(2_000_000, min(8_000_000, target_cost))
 
     vertex_chunks = []
     ptr = 0
