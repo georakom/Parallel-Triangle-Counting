@@ -97,14 +97,16 @@ def coordinator(graph, num_workers, task_queue, result_queues):
             remaining_cost = compute_total_cost(second_half[ptr:], graph)
             remaining_requests = max(1, len(pending_requests) + 1)  # include this one
 
-            # Adjust dynamic chunk target based on number of workers
-            scaling_factor = 3.0 if num_workers <= 4 else 1.5 if num_workers <= 16 else 1.2
+            # Hybrid chunk scaling based on number of workers
+            if num_workers <= 4:
+                target_cost = 2_000_000  # More granular
+            elif num_workers <= 16:
+                target_cost = 4_000_000
+            else:
+                target_cost = 6_000_000  # Coarse chunks okay
 
-            target_cost = int(remaining_cost / (remaining_requests * scaling_factor))
-
-            # Clamp to safe bounds
-            target_cost = min(target_cost, 10_000_000)
-            target_cost = max(target_cost, 2_000_000)  # lower bound to avoid 1-node chunks
+            # Clamp it still to avoid edge cases
+            target_cost = max(1_000_000, min(target_cost, 10_000_000))
 
             # target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (remaining_requests * 1.2))) PREVIOUS
 
