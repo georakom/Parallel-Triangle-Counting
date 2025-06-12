@@ -70,7 +70,10 @@ def coordinator(graph, num_workers, task_queue, result_queues):
 
     degrees_list = [graph.degree(n) for n in nodes_sorted]
     median_deg = int(np.median(degrees_list))
-    target_cost = median_deg * 100
+    avg_deg = total_cost / len(nodes_sorted)
+
+    # Pick a cost between avg and median-derived heuristics
+    target_cost = max(1_000_000, min(6_000_000, int(max(avg_deg * 40, median_deg * 100))))
 
     vertex_chunks = []
     ptr = 0
