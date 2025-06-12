@@ -97,7 +97,13 @@ def coordinator(graph, num_workers, task_queue, result_queues):
             remaining_cost = compute_total_cost(second_half[ptr:], graph)
             remaining_requests = max(1, len(pending_requests) + 1)  # include this one
 
-            target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (remaining_requests * 1.2)))
+            # === Smarter dynamic chunk sizing ===
+            initial_cap = 0.8 * worker_costs[best_worker]
+            target_cost = int(remaining_cost / (remaining_requests * 1.2))
+            target_cost = min(target_cost, initial_cap)
+            target_cost = max(MIN_CHUNK_COST, target_cost)
+
+            #target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (remaining_requests * 1.2))) PREVIOUS
 
             chunk, cost = [], 0
             while ptr < len(second_half) and cost < target_cost:
