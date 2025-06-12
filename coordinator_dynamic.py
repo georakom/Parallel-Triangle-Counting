@@ -70,7 +70,6 @@ def coordinator(graph, num_workers, task_queue, result_queues):
     print(f"Initialization time: {time.time() - init_time:.4f} seconds")
 
     ptr = 0
-    k = 1.0
     worker_costs = costs.copy()  # Already did first-half work
     workers_sent_stop = set()
     workers_reported_done = set()
@@ -92,14 +91,14 @@ def coordinator(graph, num_workers, task_queue, result_queues):
                 workers_reported_done.add(worker_id)
 
         if pending_requests and ptr < len(second_half):
-            # Choose the least-loaded worker from pending
             best_worker = min(pending_requests, key=lambda wid: worker_costs[wid])
             pending_requests.remove(best_worker)
 
             remaining_cost = compute_total_cost(second_half[ptr:], graph)
-            # Comments to test
-            target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (num_workers * k)))
-            k *= 0.5
+            remaining_requests = max(1, len(pending_requests) + 1)  # include this one
+
+            target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (remaining_requests * 1.2)))
+
             chunk, cost = [], 0
             while ptr < len(second_half) and cost < target_cost:
                 node = second_half[ptr]
@@ -118,7 +117,6 @@ def coordinator(graph, num_workers, task_queue, result_queues):
             worker_costs[best_worker] += cost
             print(f"Coordinator assigned {len(chunk)} nodes (cost={cost}) to worker {best_worker}", flush=True)
 
-        # If no work remains, send "stop" to anyone still requesting
         if ptr >= len(second_half) and pending_requests:
             for wid in pending_requests:
                 if wid not in workers_sent_stop:
@@ -131,6 +129,7 @@ def coordinator(graph, num_workers, task_queue, result_queues):
         print(f"  Worker {i}: {count}")
     total = sum(triangle_counts)
     print(f"\nTotal triangles: {total}")
+
 
 
 def read_graph_from_file(filename, batch_size=1_000_000):
