@@ -2,6 +2,7 @@ import networkx as nx
 import multiprocessing as mp
 import time
 import random
+import numpy as np
 
 def compute_local_triangles(shared_neighbors, nodes):
     triangle_count = 0
@@ -30,95 +31,6 @@ def worker(worker_id, shared_neighbors, task_queue, result_queue):
 
         task_queue.put(("triangle_count", worker_id, count))
         task_queue.put(("request_chunk", worker_id))
-
-
-def compute_total_cost(nodes, G):
-    return sum(G.degree(n) for n in nodes)
-
-# BEST COORDINATOR SO I WONT DELETE IT JUST YET
-# def coordinator(graph, num_workers, task_queue, result_queues):
-#     start_time = time.time()
-# 
-#     # Sort nodes to ensure deterministic cost-balancing split
-#     nodes_sorted = sorted(graph.nodes())
-#     total_cost = sum(graph.degree(n) for n in nodes_sorted)
-#     half_cost = total_cost // 2
-# 
-#     # === Cost-balanced first-half split ===
-#     first_half, cumulative = [], 0
-#     for node in nodes_sorted:
-#         deg = graph.degree(node)
-#         if cumulative + deg > half_cost:
-#             break
-#         first_half.append(node)
-#         cumulative += deg
-#     second_half = nodes_sorted[len(first_half):]
-# 
-#     # === Assign first-half nodes greedily to workers ===
-#     chunks = [[] for _ in range(num_workers)]
-#     worker_costs = [0] * num_workers
-#     for node in first_half:
-#         deg = graph.degree(node)
-#         i = worker_costs.index(min(worker_costs))
-#         chunks[i].append(node)
-#         worker_costs[i] += deg
-# 
-#     for i in range(num_workers):
-#         result_queues[i].put(("chunk", chunks[i]))
-#         print(f"Coordinator sent {len(chunks[i])} nodes (cost={worker_costs[i]}) to worker {i}", flush=True)
-# 
-#     print(f"Coordinator init finished in {time.time() - start_time:.2f} seconds")
-# 
-#     # === Dynamic chunking for second half ===
-#     ptr = 0
-#     pending_requests = []
-#     workers_done = set()
-#     stop_sent = set()
-#     triangle_counts = [0] * num_workers
-# 
-#     while len(workers_done) < num_workers:
-#         # Drain queue
-#         while not task_queue.empty():
-#             msg_type, *data = task_queue.get()
-#             if msg_type == "request_chunk":
-#                 pending_requests.append(data[0])
-#             elif msg_type == "triangle_count":
-#                 wid, count = data
-#                 triangle_counts[wid] += count
-#             elif msg_type == "done":
-#                 workers_done.add(data[0])
-# 
-#         # Serve requests
-#         while pending_requests and ptr < len(second_half):
-#             wid = pending_requests.pop(0)
-# 
-#             remaining = second_half[ptr:]
-#             avg_deg = total_cost / len(nodes_sorted)
-#             target_cost = max(1_000_000, min(6_000_000, int(avg_deg * 50)))  # ≈ 50 nodes worth
-# 
-#             chunk, cost = [], 0
-#             while ptr < len(second_half) and cost < target_cost:
-#                 node = second_half[ptr]
-#                 chunk.append(node)
-#                 cost += graph.degree(node)
-#                 ptr += 1
-# 
-#             result_queues[wid].put(("chunk", chunk))
-#             worker_costs[wid] += cost
-#             print(f"Sent {len(chunk)} nodes (cost={cost}) to worker {wid}", flush=True)
-# 
-#         # If no more work and workers still waiting, send stop
-#         if ptr >= len(second_half):
-#             for wid in pending_requests:
-#                 if wid not in stop_sent:
-#                     result_queues[wid].put(("stop", None))
-#                     stop_sent.add(wid)
-#             pending_requests.clear()
-# 
-#     print("\n=== Triangles per worker ===")
-#     for i, count in enumerate(triangle_counts):
-#         print(f"Worker {i}: {count}")
-#     print(f"TOTAL triangles: {sum(triangle_counts)}")
 
 def coordinator(graph, num_workers, task_queue, result_queues):
     start_time = time.time()
@@ -152,9 +64,13 @@ def coordinator(graph, num_workers, task_queue, result_queues):
 
     print(f"Coordinator init finished in {time.time() - start_time:.2f} seconds")
 
-    # === Pre-chunk second half ===
-    avg_deg = total_cost / len(nodes_sorted)
-    target_cost = max(1_000_000, min(6_000_000, int(avg_deg * 50)))  # ≈ 50 nodes worth
+    # === Pre-chunk second half === COMMENTING TO TEST
+    # avg_deg = total_cost / len(nodes_sorted)
+    # target_cost = max(1_000_000, min(6_000_000, int(avg_deg * 50)))  # ≈ 50 nodes worth
+
+    degrees_list = [graph.degree(n) for n in nodes_sorted]
+    median_deg = int(np.median(degrees_list))
+    target_cost = median_deg * 100
 
     vertex_chunks = []
     ptr = 0
