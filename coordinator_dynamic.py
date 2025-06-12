@@ -2,7 +2,6 @@ import networkx as nx
 import multiprocessing as mp
 import time
 import random
-import queue
 
 def compute_local_triangles(shared_neighbors, nodes):
     triangle_count = 0
@@ -38,77 +37,64 @@ def compute_total_cost(nodes, G):
 
 
 def coordinator(graph, num_workers, task_queue, result_queues):
-    init_time = time.time()
+    start_time = time.time()
+
+    # Sort nodes to ensure deterministic cost-balancing split
     nodes_sorted = sorted(graph.nodes())
-    total_cost = compute_total_cost(graph.nodes(), graph)
+    total_cost = sum(graph.degree(n) for n in nodes_sorted)
     half_cost = total_cost // 2
 
-    first_half = []
-    first_half_cost = 0
+    # === Cost-balanced first-half split ===
+    first_half, cumulative = [], 0
     for node in nodes_sorted:
-        cost = graph.degree(node)
-        if first_half_cost + cost <= half_cost:
-            first_half.append(node)
-            first_half_cost += cost
-        else:
+        deg = graph.degree(node)
+        if cumulative + deg > half_cost:
             break
+        first_half.append(node)
+        cumulative += deg
+    second_half = nodes_sorted[len(first_half):]
 
-    second_half_start_idx = len(first_half)
-    second_half = list(nodes_sorted)[second_half_start_idx:]
-
-    # === INITIAL WORK: Evenly split first half ===
+    # === Assign first-half nodes greedily to workers ===
     chunks = [[] for _ in range(num_workers)]
-    costs = [0] * num_workers
+    worker_costs = [0] * num_workers
     for node in first_half:
-        min_worker = costs.index(min(costs))
-        chunks[min_worker].append(node)
-        costs[min_worker] += graph.degree(node)
+        deg = graph.degree(node)
+        i = worker_costs.index(min(worker_costs))
+        chunks[i].append(node)
+        worker_costs[i] += deg
 
     for i in range(num_workers):
         result_queues[i].put(("chunk", chunks[i]))
-        print(f"Coordinator initially assigned {len(chunks[i])} nodes (cost={compute_total_cost(chunks[i], graph)}) to worker {i}", flush=True)
-    print(f"Initialization time: {time.time() - init_time:.4f} seconds")
+        print(f"Coordinator sent {len(chunks[i])} nodes (cost={worker_costs[i]}) to worker {i}", flush=True)
 
+    print(f"Coordinator init finished in {time.time() - start_time:.2f} seconds")
+
+    # === Dynamic chunking for second half ===
     ptr = 0
-    worker_costs = costs.copy()  # Already did first-half work
-    workers_sent_stop = set()
-    workers_reported_done = set()
-    triangle_counts = [0] * num_workers
-    MIN_CHUNK_NODES = 50000
-    MIN_CHUNK_COST = 2000000
     pending_requests = []
+    workers_done = set()
+    stop_sent = set()
+    triangle_counts = [0] * num_workers
 
-    while len(workers_reported_done) < num_workers:
+    while len(workers_done) < num_workers:
+        # Drain queue
         while not task_queue.empty():
             msg_type, *data = task_queue.get()
             if msg_type == "request_chunk":
                 pending_requests.append(data[0])
             elif msg_type == "triangle_count":
-                worker_id, count = data
-                triangle_counts[worker_id] += count
+                wid, count = data
+                triangle_counts[wid] += count
             elif msg_type == "done":
-                worker_id = data[0]
-                workers_reported_done.add(worker_id)
+                workers_done.add(data[0])
 
-        if pending_requests and ptr < len(second_half):
-            best_worker = min(pending_requests, key=lambda wid: worker_costs[wid])
-            pending_requests.remove(best_worker)
+        # Serve requests
+        while pending_requests and ptr < len(second_half):
+            wid = pending_requests.pop(0)
 
-            remaining_cost = compute_total_cost(second_half[ptr:], graph)
-            remaining_requests = max(1, len(pending_requests) + 1)  # include this one
-
-            # Hybrid chunk scaling based on number of workers
-            if num_workers <= 4:
-                target_cost = 2_000_000  # More granular
-            elif num_workers <= 16:
-                target_cost = 4_000_000
-            else:
-                target_cost = 6_000_000  # Coarse chunks okay
-
-            # Clamp it still to avoid edge cases
-            target_cost = max(1_000_000, min(target_cost, 10_000_000))
-
-            # target_cost = max(MIN_CHUNK_COST, int(remaining_cost / (remaining_requests * 1.2))) PREVIOUS
+            remaining = second_half[ptr:]
+            avg_deg = total_cost / len(nodes_sorted)
+            target_cost = max(1_000_000, min(6_000_000, int(avg_deg * 50)))  # ≈ 50 nodes worth
 
             chunk, cost = [], 0
             while ptr < len(second_half) and cost < target_cost:
@@ -117,29 +103,23 @@ def coordinator(graph, num_workers, task_queue, result_queues):
                 cost += graph.degree(node)
                 ptr += 1
 
-            if len(second_half) - ptr < MIN_CHUNK_NODES:
-                while ptr < len(second_half):
-                    node = second_half[ptr]
-                    chunk.append(node)
-                    cost += graph.degree(node)
-                    ptr += 1
+            result_queues[wid].put(("chunk", chunk))
+            worker_costs[wid] += cost
+            print(f"Sent {len(chunk)} nodes (cost={cost}) to worker {wid}", flush=True)
 
-            result_queues[best_worker].put(("chunk", chunk))
-            worker_costs[best_worker] += cost
-            print(f"Coordinator assigned {len(chunk)} nodes (cost={cost}) to worker {best_worker}", flush=True)
-
-        if ptr >= len(second_half) and pending_requests:
+        # If no more work and workers still waiting, send stop
+        if ptr >= len(second_half):
             for wid in pending_requests:
-                if wid not in workers_sent_stop:
+                if wid not in stop_sent:
                     result_queues[wid].put(("stop", None))
-                    workers_sent_stop.add(wid)
+                    stop_sent.add(wid)
             pending_requests.clear()
 
-    print("\nTriangles per worker:")
+    print("\n=== Triangles per worker ===")
     for i, count in enumerate(triangle_counts):
-        print(f"  Worker {i}: {count}")
-    total = sum(triangle_counts)
-    print(f"\nTotal triangles: {total}")
+        print(f"Worker {i}: {count}")
+    print(f"TOTAL triangles: {sum(triangle_counts)}")
+
 
 
 
