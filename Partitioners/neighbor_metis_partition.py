@@ -1,14 +1,15 @@
 import time
 import metis
+from collections import  Counter
 
 """
 Partition the graph using a hybrid strategy:
   - High-degree nodes and their neighbors go to METIS
-  - Low-degree nodes are hashed into a partition 
+  - Low-degree nodes follow neighbors' partitions (majority vote)
 This approach balances partition quality with speed and is much faster than full-METIS while retaining structure.
 """
 
-def improved_hash_metis_partition(G, num_workers, degree_cutoff=40):
+def improved_neighbor_metis_partition(G, num_workers, degree_cutoff=50):
     start_time = time.time()
 
     # Identify high-degree nodes based on cutoff
@@ -23,7 +24,7 @@ def improved_hash_metis_partition(G, num_workers, degree_cutoff=40):
     rest_nodes = list(set(G.nodes()) - set(metis_nodes)) # Nodes not included in METIS
 
     print(f"METIS will process {len(metis_nodes)} nodes (high-degree and neighbors)")
-    print(f"Remaining nodes for hashing: {len(rest_nodes)}")
+    print(f"Remaining nodes for neighbor-aware hashing: {len(rest_nodes)}")
 
     # Assignment dictionary (node → partition id)
     assignments = {}
@@ -37,13 +38,16 @@ def improved_hash_metis_partition(G, num_workers, degree_cutoff=40):
             assignments[node] = part
             partitions[part].append(node)
 
-    # Assign the remaining nodes by hashing
+    # Assign the remaining nodes by neighbor majority or fallback to hash
     for node in rest_nodes:
-        neighbor_ids = sorted([n for n in G.neighbors(node) if n in assignments])
-        key = tuple(neighbor_ids[:3])  # use first 3 assigned neighbors for stability
-        part = hash(key) % num_workers
-        partitions[part].append(node)
-        assignments[node] = part
+        # Get list of already-assigned neighbor partitions
+        neighbor_parts = [assignments[n] for n in G.neighbors(node) if n in assignments]
 
-    print(f"Improved hashing-METIS took: {time.time() - start_time:.4f} seconds")
+        # Assign to the most common partition among neighbors
+        chosen = Counter(neighbor_parts).most_common(1)[0][0]
+
+        assignments[node] = chosen
+        partitions[chosen].append(node)
+
+    print(f"Improved hybrid METIS+neighbor-follow took: {time.time() - start_time:.4f} seconds")
     return partitions, assignments

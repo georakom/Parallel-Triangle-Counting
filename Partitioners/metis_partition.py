@@ -2,7 +2,6 @@ import time
 import metis
 
 """ 
-Distributed Parallel Triangle Counting using METIS. 
 While pure triangle-counting is extremely fast, we have a very noticeable preprocessing and memory overhead. 
 Due to METIS non triangle-aware partitioning, we end up losing scalability, especially in memory.
 """

@@ -87,8 +87,8 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     return total_triangles
 
 if __name__ == "__main__":
-    filepath = "./data/"
-    filename = "com-youtube.ungraph.txt"
+    filepath = "/data/delab/georakom/"
+    filename = "lfriendster.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)

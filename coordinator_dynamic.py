@@ -75,15 +75,16 @@ def coordinator(graph, num_workers, task_queue, result_queues):
     # Dynamic Chunk Size Estimation Strategy
     avg_deg = total_cost / len(nodes_sorted)
 
-    scale = len(graph.edges) / 34_681_189  # LiveJournal = baseline
+    scale = len(graph.edges) / 34_681_189  # Normalize vs LiveJournal
     min_cost = int(1_000_000 * scale)
     max_cost = int(6_000_000 * scale)
 
     target_cost = max(min_cost, min(max_cost, int(avg_deg * 50)))
 
     vertex_chunks = []
-    ptr = 0 # Pointer for nodes in second half
+    ptr = 0
 
+    # Build chunks greedily
     while ptr < len(second_half):
         chunk, cost = [], 0
         while ptr < len(second_half) and cost < target_cost:
@@ -103,6 +104,8 @@ def coordinator(graph, num_workers, task_queue, result_queues):
     triangle_counts = [0] * num_workers
 
     while len(workers_done) < num_workers:
+
+        # Pull and process any messages from workers
         while not task_queue.empty():
             msg_type, *data = task_queue.get()
             if msg_type == "request_chunk":
@@ -113,6 +116,7 @@ def coordinator(graph, num_workers, task_queue, result_queues):
             elif msg_type == "done":
                 workers_done.add(data[0])
 
+        # For every pending worker request, if there's a chunk left, send it
         while pending_requests and chunk_ptr < len(vertex_chunks):
             wid = pending_requests.pop(0)
             chunk = vertex_chunks[chunk_ptr]
@@ -178,7 +182,6 @@ if __name__ == "__main__":
 
         # Shared data (read-only dicts, passed by copy)
         shared_neighbors = {v: set(u for u in graph.adj[v] if u > v) for v in graph.nodes()}
-        degrees = dict(graph.degree())
 
         # Launch worker processes
         workers = []

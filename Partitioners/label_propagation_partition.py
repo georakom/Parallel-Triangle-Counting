@@ -2,7 +2,6 @@ import networkx as nx
 import time
 
 """
-Distributed Parallel Triangle Counting using Label Propagation.
 This method uses asynchronous Label Propagation to detect communities, which are then assigned to workers
 in a round-robin fashion.  
 Label Propagation tends to create many small, unstable communities that lead to a high number of mirror nodes 

@@ -25,7 +25,7 @@ def extract_all_worker_data(G, partitions, assignments, num_workers):
         node_to_workers[u].add(worker_id)
         node_to_workers[v].add(worker_id)
 
-    # Inline proxy edge insertion without looping all edges again
+    # Inline proxy edge insertion
     for u, v in G.edges():
         if u > v:
             u, v = v, u
@@ -46,7 +46,7 @@ def extract_all_worker_data(G, partitions, assignments, num_workers):
     return worker_data
 
 
-def edge_iterator_hashed(edge_list, master_nodes):
+def count_triangles(edge_list, master_nodes):
     process = psutil.Process()
     mem_usage_mb = process.memory_info().rss / (1024 * 1024)
     count = 0
@@ -73,7 +73,7 @@ def parallel_triangle_count(G, num_workers, partition_func):
 
     triangle_time = time.time()
     with Pool(num_workers) as pool:
-        results = pool.starmap(edge_iterator_hashed, worker_data)
+        results = pool.starmap(count_triangles, worker_data)
     print(f"Pure triangle counting took: {time.time() - triangle_time:.4f} seconds")
     return sum(results)
 
@@ -113,24 +113,18 @@ if __name__ == "__main__":
     try:
         graph = read_graph_from_file(filepath + filename)
 
-        # avg_degree = sum(dict(graph.degree()).values()) / graph.number_of_nodes()
-        # print(f"Average degree of the graph: {avg_degree:.2f}")
-        #print(f"Number of Nodes: {graph.number_of_nodes()}")
-        #print(f"Number of Edges: {graph.number_of_edges()}")
-
         start_time = time.time()
-        total_triangles = parallel_triangle_count(graph, 4, p.metis_partition) # Deciding the partition
+        total_triangles = parallel_triangle_count(graph, 4, p.hashing_metis_partition) # Deciding the partition
         end_time = time.time()
 
         print(f"Total triangles: {total_triangles}")
         print("Triangle Algorithm time: ", end_time - start_time)
 
-        start_time = time.time()
-        triangles_networkx = nx.triangles(graph)
-        triangles_networkx_count = sum(triangles_networkx.values()) // 3
-        end_time = time.time()
-        print(f"Total triangles (NetworkX): {triangles_networkx_count}")
-        print("Triangle Algorithm time (NetworkX): ", end_time - start_time)
+        # start_time = time.time()
+        # triangles_networkx = nx.triangles(graph).values() // 3
+        # end_time = time.time()
+        # print(f"Total triangles (NetworkX): {triangles_networkx}")
+        # print("Triangle Algorithm time (NetworkX): ", end_time - start_time)
 
     except FileNotFoundError:
         print("Graph file not found.")

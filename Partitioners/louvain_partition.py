@@ -1,6 +1,6 @@
 import time
 from collections import defaultdict
-import community as community_louvain
+from community import community_louvain
 
 """
 Distributed Parallel Triangle Counting using Louvain Community detection.

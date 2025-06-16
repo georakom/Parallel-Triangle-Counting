@@ -5,6 +5,7 @@ import random
 from multiprocessing import shared_memory
 import multiprocessing as mp
 import os
+from numba import njit
 
 # Assigns a total order (ranking) to nodes based on degree to build the A+ representation
 def rank_by_degree(G):
@@ -68,6 +69,7 @@ def build_A_plus_csr(G, rank):
     )
 
 # Intersect two sorted arrays (neighbors) using the merge-based approach
+@njit
 def merge_intersect_count(arr1, arr2):
     count = 0
     i = j = 0
