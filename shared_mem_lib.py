@@ -3,7 +3,6 @@ import networkx as nx
 import numpy as np
 import random
 from multiprocessing import shared_memory
-import multiprocessing as mp
 import os
 from numba import njit
 
@@ -88,8 +87,8 @@ def merge_intersect_count(arr1, arr2):
 def hash_intersect_count(arr_small, arr_large_set):
     return sum(1 for x in arr_small if x in arr_large_set) # One side is converted to a set; the other is scanned
 
-# Worker for merge-based triangle counting
-def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict):
+# Worker for merge-based triangle counting QUEUE TEST
+def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, queue):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (MERGE)")
     tri_time = time.time()
@@ -113,10 +112,10 @@ def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_t
     shm_indptr.close()
     shm_indices.close()
     print(f"[Worker {pid}] FINISHED. Found {local_count} triangles, in {time.time() - tri_time:.4f} secs", flush=True)
-    return_dict[mp.current_process().name] = local_count
+    queue.put(local_count)
 
-# Worker for hash-based triangle counting
-def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, return_dict):
+# Worker for hash-based triangle counting QUEUE TEST
+def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, queue):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (HASH)")
     tri_time = time.time()
@@ -146,7 +145,7 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
     shm_indices.close()
 
     print(f"[Worker {pid}] FINISHED. Found {local_count} triangles in {time.time() - tri_time:.4f} secs.", flush=True)
-    return_dict[mp.current_process().name] = local_count
+    queue.put(local_count)
 
 def read_graph_from_file(filename, batch_size=1_000_000):
     G = nx.Graph()
