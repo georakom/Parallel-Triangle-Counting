@@ -67,7 +67,7 @@ def build_A_plus_csr(G, rank):
 
     return (
         np.array(new_indptr, dtype=np.int64), np.array(new_indices, dtype=np.int64),
-        list(nodes), node_to_idx_arr
+        nodes, node_to_idx_arr
     )
 
 # Intersect two sorted arrays (neighbors) using the merge-based approach

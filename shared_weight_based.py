@@ -96,8 +96,8 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     return total_triangles
 
 if __name__ == "__main__":
-    filepath = "./data/"
-    filename = "amazon.txt"
+    filepath = "/data/delab/georakom"
+    filename = "lfriendster.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
@@ -105,18 +105,10 @@ if __name__ == "__main__":
         for method in ["merge", "hash"]:
             print(f"\n===== Running TC-{method.upper()} =====")
             start_time = time.time()
-            total_triangles = parallel_triangle_count(graph, 4, method=method)
+            total_triangles = parallel_triangle_count(graph, 32, method=method)
             end_time = time.time()
             print(f"Total triangles ({method}): {total_triangles}")
             print(f"Triangle Algorithm time ({method}): {end_time - start_time:.4f} seconds")
-
-        # print("\n===== NetworkX Verification =====")
-        # start_time = time.time()
-        # triangles_networkx = nx.triangles(graph)
-        # triangles_networkx_count = sum(triangles_networkx.values()) // 3
-        # end_time = time.time()
-        # print(f"Total triangles (NetworkX): {triangles_networkx_count}")
-        # print(f"Triangle Algorithm time (NetworkX): {end_time - start_time:.4f} seconds")
 
     except FileNotFoundError:
         print("File not found")
