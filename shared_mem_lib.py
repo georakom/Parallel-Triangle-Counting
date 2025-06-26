@@ -48,7 +48,10 @@ def build_A_plus_csr(G, rank):
     # Filter out nodes with zero A⁺ neighbors (they won’t contribute triangles)
     non_empty = A_plus_counts > 0
     nodes = node_list[non_empty]
-    node_to_idx = {node: i for i, node in enumerate(nodes)}
+    max_node_id = max(node_list)
+    node_to_idx_arr = np.full(max_node_id + 1, -1, dtype=np.int32)
+    for i, node in enumerate(nodes):
+        node_to_idx_arr[node] = i
 
     # Rebuild compacted indptr/indices for only these nodes
     new_indptr = [0]
@@ -64,7 +67,7 @@ def build_A_plus_csr(G, rank):
 
     return (
         np.array(new_indptr, dtype=np.int64), np.array(new_indices, dtype=np.int64),
-        list(nodes), node_to_idx
+        list(nodes), node_to_idx_arr
     )
 
 # Intersect two sorted arrays (neighbors) using the merge-based approach
@@ -88,7 +91,7 @@ def hash_intersect_count(arr_small, arr_large_set):
     return sum(1 for x in arr_small if x in arr_large_set) # One side is converted to a set; the other is scanned
 
 # Worker for merge-based triangle counting QUEUE TEST
-def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, queue):
+def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, shm_name_node_to_idx, queue):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (MERGE)")
     tri_time = time.time()
@@ -98,13 +101,15 @@ def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_t
     shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
     indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
     indices = np.ndarray((indptr[-1],), dtype=np.int64, buffer=shm_indices.buf)
+    shm_node_to_idx = shared_memory.SharedMemory(name=shm_name_node_to_idx)
+    node_to_idx = np.ndarray(shm_node_to_idx.size // 4, dtype=np.int32, buffer=shm_node_to_idx.buf)
 
     local_count = 0
     for v in nodes_chunk:
         v_idx = node_to_idx[v]
         neighbors_v = indices[indptr[v_idx]:indptr[v_idx + 1]]
         for w in neighbors_v:
-            if w not in node_to_idx:
+            if node_to_idx[w] == -1:
                 continue
             w_idx = node_to_idx[w]
             neighbors_w = indices[indptr[w_idx]:indptr[w_idx + 1]]
@@ -115,7 +120,7 @@ def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_t
     queue.put(local_count)
 
 # Worker for hash-based triangle counting QUEUE TEST
-def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to_idx, queue):
+def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, shm_name_node_to_idx, queue):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (HASH)")
     tri_time = time.time()
@@ -125,13 +130,15 @@ def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, node_to
     shm_indices = shared_memory.SharedMemory(name=shm_name_indices)
     indptr = np.ndarray((n_nodes + 1,), dtype=np.int64, buffer=shm_indptr.buf)
     indices = np.ndarray((indptr[-1],), dtype=np.int64, buffer=shm_indices.buf)
+    shm_node_to_idx = shared_memory.SharedMemory(name=shm_name_node_to_idx)
+    node_to_idx = np.ndarray(shm_node_to_idx.size // 4, dtype=np.int32, buffer=shm_node_to_idx.buf)
 
     local_count = 0
     for v in nodes_chunk:
         v_idx = node_to_idx[v]
         neighbors_v = indices[indptr[v_idx]:indptr[v_idx + 1]]
         for w in neighbors_v:
-            if w not in node_to_idx:
+            if node_to_idx[w] == -1:
                 continue
             w_idx = node_to_idx[w]
             neighbors_w = indices[indptr[w_idx]:indptr[w_idx + 1]]

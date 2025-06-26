@@ -21,6 +21,10 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     shm_indices_buf = np.ndarray(indices.shape, dtype=indices.dtype, buffer=shm_indices.buf)
     shm_indptr_buf[:] = indptr[:]
     shm_indices_buf[:] = indices[:]
+    shm_node_to_idx = shared_memory.SharedMemory(create=True, size=node_to_idx.nbytes)
+    shm_node_to_idx_buf = np.ndarray(node_to_idx.shape, dtype=node_to_idx.dtype, buffer=shm_node_to_idx.buf)
+    shm_node_to_idx_buf[:] = node_to_idx[:]
+
     print(f"[TIME] Shared memory setup: {time.time() - shm_start:.4f} sec")
 
     manager_start = time.time() # QUEUE TEST
@@ -57,11 +61,11 @@ def parallel_triangle_count(G, num_workers, method="merge"):
         if method == "merge": # QUEUE TEST
             p = mp.Process(target=worker_merge,
                             args=(shm_indptr.name, shm_indices.name, len(nodes),
-                                    nodes_chunk, node_to_idx, queue))
+                                    nodes_chunk, shm_node_to_idx.name, queue))
         elif method == "hash": # QUEUE TEST
             p = mp.Process(target=worker_hash,
                             args=(shm_indptr.name, shm_indices.name, len(nodes),
-                                    nodes_chunk, node_to_idx, queue))
+                                    nodes_chunk, shm_node_to_idx.name, queue))
         else:
             raise ValueError("Method must be 'merge' or 'hash'")
         processes.append(p)
@@ -75,9 +79,7 @@ def parallel_triangle_count(G, num_workers, method="merge"):
 
     aggregation_start = time.time() # QUEUE TEST
     # total_triangles = sum(return_dict.values())
-    total_triangles = 0
-    for _ in range(num_workers):
-        total_triangles += queue.get()
+    total_triangles = sum(queue.get() for _ in range(num_workers))
     print(f"[TIME] Aggregating results: {time.time() - aggregation_start:.4f} sec")
 
     # Cleanup shared memory
@@ -86,14 +88,16 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     shm_indptr.unlink()
     shm_indices.close()
     shm_indices.unlink()
+    shm_node_to_idx.close()
+    shm_node_to_idx.unlink()
     print(f"[TIME] Shared memory cleanup: {time.time() - cleanup_start:.4f} sec")
 
     print(f"[TIME] Total pipeline: {time.time() - total_start:.4f} sec")
     return total_triangles
 
 if __name__ == "__main__":
-    filepath = "/data/delab/georakom/"
-    filename = "lfriendster.txt"
+    filepath = "./data/"
+    filename = "amazon.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
