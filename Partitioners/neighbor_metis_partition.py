@@ -9,7 +9,7 @@ Partition the graph using a hybrid strategy:
 This approach balances partition quality with speed and is much faster than full-METIS while retaining structure.
 """
 
-def improved_neighbor_metis_partition(G, num_workers, degree_cutoff=50):
+def improved_neighbor_metis_partition(G, num_workers, degree_cutoff=15000):
     start_time = time.time()
 
     # Identify high-degree nodes based on cutoff
@@ -40,11 +40,11 @@ def improved_neighbor_metis_partition(G, num_workers, degree_cutoff=50):
 
     # Assign the remaining nodes by neighbor majority or fallback to hash
     for node in rest_nodes:
-        # Get list of already-assigned neighbor partitions
         neighbor_parts = [assignments[n] for n in G.neighbors(node) if n in assignments]
-
-        # Assign to the most common partition among neighbors
-        chosen = Counter(neighbor_parts).most_common(1)[0][0]
+        if neighbor_parts:
+            chosen = Counter(neighbor_parts).most_common(1)[0][0]
+        else:
+            chosen = hash(node) % num_workers
 
         assignments[node] = chosen
         partitions[chosen].append(node)
