@@ -103,24 +103,9 @@ def count_triangles(edge_list, master_nodes):
     for u, v in edge_list:
         neighbor_sets[u].add(v)
 
-    # Pre-sort neighbor lists once
-    sorted_neighbors = {node: sorted(neighs) for node, neighs in neighbor_sets.items()}
-
     for u in master_nodes:
-        u_neighbors = sorted_neighbors.get(u, [])
-        for v in u_neighbors:
-            v_neighbors = sorted_neighbors.get(v, [])
-            # Merge-style intersection
-            i = j = 0
-            while i < len(u_neighbors) and j < len(v_neighbors):
-                if u_neighbors[i] == v_neighbors[j]:
-                    count += 1
-                    i += 1
-                    j += 1
-                elif u_neighbors[i] < v_neighbors[j]:
-                    i += 1
-                else:
-                    j += 1
+        for v in neighbor_sets[u]:
+            count += len(neighbor_sets[v] & neighbor_sets[u])
 
     print(f"[Worker {os.getpid()}] FINISHED. Found {count} triangles. Memory used: {mem_usage_mb:.2f} MB")
     return count
@@ -172,8 +157,8 @@ def read_graph_from_file(filename, batch_size=1_000_000):
 if __name__ == "__main__":
     import Partitioners as p # Importing the partitioning algorithm to use
 
-    filepath = "./data/"
-    filename = "com-youtube.ungraph.txt"
+    filepath = "/data/delab/georakom/"
+    filename = "com-lj.ungraph.txt"
 
     try:
         graph = read_graph_from_file(filepath + filename)
