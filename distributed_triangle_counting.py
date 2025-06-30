@@ -1,119 +1,168 @@
 import random
 import time
-from multiprocessing import Pool
 import networkx as nx
-from collections import defaultdict
-import psutil
-import os
+import numpy as np
 
-def extract_all_worker_data(G, partitions, assignments, num_workers):
-    # Per worker storage
-    worker_edges = [set() for _ in range(num_workers)]
-    worker_nodes_used = [set() for _ in range(num_workers)]
-    node_to_workers = defaultdict(set)
+from numba import njit, types
+from numba.typed import List, Dict
 
-    # Fast adjacency lookup to avoid second edge pass
-    edge_set = set()
+@njit
+def build_worker_edges(indptr, indices, assignments_array, partitions_list, num_workers):
+    worker_edges = List()
+    worker_nodes = List()
+    for _ in range(num_workers):
+        worker_edges.append(List.empty_list(types.UniTuple(types.int32, 2)))
+        worker_nodes.append(set())
+
+    for u in range(len(indptr) - 1):
+        master_u = assignments_array[u]
+        start_u, end_u = indptr[u], indptr[u + 1]
+        neighbors_u = indices[start_u:end_u]
+
+        # Assign (u, v)
+        for i in range(start_u, end_u):
+            v = indices[i]
+            if u < v:
+                worker_edges[master_u].append((u, v))
+                worker_nodes[master_u].add(u)
+                worker_nodes[master_u].add(v)
+
+        # Triangle closure via (v, w)
+        for i in range(start_u, end_u):
+            v = indices[i]
+            if v <= u:
+                continue
+            start_v, end_v = indptr[v], indptr[v + 1]
+            neighbors_v = indices[start_v:end_v]
+
+            for j in range(i + 1, end_u):
+                w = indices[j]
+                if w <= v:
+                    continue
+                # in-place merge (v, w)
+                vi = 0
+                while vi < len(neighbors_v):
+                    if neighbors_v[vi] == w:
+                        worker_edges[master_u].append((v, w))
+                        worker_nodes[master_u].add(v)
+                        worker_nodes[master_u].add(w)
+                        break
+                    elif neighbors_v[vi] < w:
+                        vi += 1
+                    else:
+                        break
+
+    return worker_edges, worker_nodes
+
+def convert_nx_to_csr(G):
+    node_list = sorted(G.nodes())
+    node_to_idx = {node: i for i, node in enumerate(node_list)}
+    idx_to_node = {i: node for node, i in node_to_idx.items()}
+    n = len(node_list)
+
+    adj = [[] for _ in range(n)]
     for u, v in G.edges():
-        if u > v:
-            u, v = v, u
-        edge_set.add((u, v))  # store directed once
-        worker_id = assignments[u]
-        worker_edges[worker_id].add((u, v))
-        worker_nodes_used[worker_id].add(u)
-        worker_nodes_used[worker_id].add(v)
-        node_to_workers[u].add(worker_id)
-        node_to_workers[v].add(worker_id)
+        uid, vid = node_to_idx[u], node_to_idx[v]
+        adj[uid].append(vid)
+        adj[vid].append(uid)
 
-    # Efficient inline proxy edge insertion: resolve only needed duplicates
-    for u, v in edge_set:
-        shared = node_to_workers[u] & node_to_workers[v]
-        for wid in shared:
-            if (u, v) not in worker_edges[wid]:
-                worker_edges[wid].add((u, v))
-                worker_nodes_used[wid].add(u)
-                worker_nodes_used[wid].add(v)
+    for neighbors in adj:
+        neighbors.sort()
 
-    # Final prep
+    indptr = np.zeros(n + 1, dtype=np.int64)
+    indices = []
+
+    for i, neighbors in enumerate(adj):
+        indptr[i + 1] = indptr[i] + len(neighbors)
+        indices.extend(neighbors)
+
+    indices = np.array(indices, dtype=np.int32)
+    return indptr, indices, node_to_idx, idx_to_node
+
+def extract_all_worker_data_csr(indptr, indices, partitions, assignments, num_workers):
+    import numpy as np
+    from numba.typed import List
+
+    num_nodes = len(indptr) - 1
+
+    # Convert dict to array for numba
+    assignments_array = np.empty(num_nodes, dtype=np.int32)
+    for u in range(num_nodes):
+        assignments_array[u] = assignments[u]
+
+    # Convert partitions to set for mirror detection
+    partition_sets = [set(p) for p in partitions]
+
+    # Call njit core
+    worker_edges, worker_nodes = build_worker_edges(indptr, indices, assignments_array, partitions, num_workers)
+
+    # Convert to Python format
     worker_data = []
     for wid in range(num_workers):
-        masters = set(partitions[wid])
-        used = worker_nodes_used[wid]
-        mirrors = used.difference(masters)
+        masters = partition_sets[wid]
+        mirrors = worker_nodes[wid] - masters
         print(f"[Worker {wid}] Mirror nodes: {len(mirrors)}")
         worker_data.append((list(worker_edges[wid]), masters))
 
     return worker_data
 
-# def extract_all_worker_data(G, partitions, assignments, num_workers):
-#     # Initialize storage per worker
-#     worker_edges = [set() for _ in range(num_workers)]
-#     worker_nodes_used = [set() for _ in range(num_workers)]
-#
-#     # Track which workers need each node
-#     node_to_workers = defaultdict(set)
-#
-#     # Pass 1: assign directed edge (u → v) to master of u, and update who uses what
-#     for u, v in G.edges():
-#         if u > v:
-#             u, v = v, u  # enforce direction u → v
-#
-#         worker_id = assignments[u]
-#         worker_edges[worker_id].add((u, v))
-#         worker_nodes_used[worker_id].update([u, v])
-#         node_to_workers[u].add(worker_id)
-#         node_to_workers[v].add(worker_id)
-#
-#     # Inline proxy edge insertion
-#     for u, v in G.edges():
-#         if u > v:
-#             u, v = v, u
-#
-#         shared_workers = node_to_workers[u] & node_to_workers[v]
-#         for wid in shared_workers:
-#             worker_edges[wid].add((u, v))
-#
-#     # Final prep
-#     worker_data = []
-#     for worker_id in range(num_workers):
-#         masters = set(partitions[worker_id])
-#         used_nodes = {u for edge in worker_edges[worker_id] for u in edge}
-#         mirrors = used_nodes - masters
-#         print(f"[Worker {worker_id}] Mirror nodes: {len(mirrors)}")
-#         worker_data.append((list(worker_edges[worker_id]), masters))
-#
-#     return worker_data
 
-def count_triangles(edge_list, master_nodes):
-    process = psutil.Process()
-    mem_usage_mb = process.memory_info().rss / (1024 * 1024)
-    count = 0
-    neighbor_sets = defaultdict(set)
-    for u, v in edge_list:
-        neighbor_sets[u].add(v)
+def count_worker_triangles(indptr, indices, master_nodes):
+    from numba import njit
+    import numpy as np
 
-    for u in master_nodes:
-        for v in neighbor_sets[u]:
-            count += len(neighbor_sets[u] & neighbor_sets.get(v, set()))
+    @njit
+    def count(indptr, indices, masters):
+        count = 0
+        for u in masters:
+            neighbors_u = indices[indptr[u]:indptr[u+1]]
+            for i in range(len(neighbors_u)):
+                v = neighbors_u[i]
+                if v <= u:
+                    continue
+                neighbors_v = indices[indptr[v]:indptr[v+1]]
+                j = i + 1
+                for j in range(i + 1, len(neighbors_u)):
+                    w = neighbors_u[j]
+                    if w <= v:
+                        continue
+                    # check if w in neighbors_v via merge
+                    vi = 0
+                    while vi < len(neighbors_v):
+                        if neighbors_v[vi] == w:
+                            count += 1
+                            break
+                        elif neighbors_v[vi] < w:
+                            vi += 1
+                        else:
+                            break
+        return count
 
-    print(f"[Worker {os.getpid()}] FINISHED. Found {count} triangles. Memory used: {mem_usage_mb:.2f} MB")
-    return count
+    return count(indptr, indices, np.array(list(master_nodes), dtype=np.int32))
+
 
 
 def parallel_triangle_count(G, num_workers, partition_func):
+    import gc
+    import numpy as np
+
     start = time.time()
     partitions, assignments = partition_func(G, num_workers)
-    prep_start = time.time()
+    indptr, indices, node_to_idx, idx_to_node = convert_nx_to_csr(G)
+    del G
+    gc.collect()
 
-    worker_data = extract_all_worker_data(G, partitions, assignments, num_workers)
-    print(f"Data preparation took: {time.time() - prep_start:.4f} seconds")
-    print(f"Preprocessing took: {time.time() - start:.4f} seconds")
+    # Remap partitions
+    partitions = [[node_to_idx[n] for n in part] for part in partitions]
 
+    from multiprocessing import Pool
     triangle_time = time.time()
+    args = [(indptr, indices, set(part)) for part in partitions]
     with Pool(num_workers) as pool:
-        results = pool.starmap(count_triangles, worker_data)
-    print(f"Pure triangle counting took: {time.time() - triangle_time:.4f} seconds")
+        results = pool.starmap(count_worker_triangles, args)
+    print(f"Triangle counting took: {time.time() - triangle_time:.4f} seconds")
     return sum(results)
+
 
 def read_graph_from_file(filename, batch_size=1_000_000):
     G = nx.Graph()
