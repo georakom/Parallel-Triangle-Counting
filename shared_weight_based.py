@@ -1,6 +1,7 @@
 from shared_mem_lib import *
 import heapq
 import multiprocessing as mp
+import gc
 
 # Shared-Memory Parallel Triangle Counting with TC-Merge and TC-Hash
 # Work between cores is split based on A+ weight
@@ -13,6 +14,8 @@ def parallel_triangle_count(G, num_workers, method="merge"):
     indptr, indices, nodes, node_to_idx = build_A_plus_csr(G, rank)
     print(f"[TIME] Preprocessing (ranking + A+): {time.time() - preprocess_start:.4f} sec")
 
+    del G
+    gc.collect()
     # Set up shared memory for CSR arrays
     shm_start = time.time()
     shm_indptr = shared_memory.SharedMemory(create=True, size=indptr.nbytes)

@@ -90,7 +90,7 @@ def merge_intersect_count(arr1, arr2):
 def hash_intersect_count(arr_small, arr_large_set):
     return sum(1 for x in arr_small if x in arr_large_set) # One side is converted to a set; the other is scanned
 
-# Worker for merge-based triangle counting QUEUE TEST
+# Worker for merge-based triangle counting
 def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, shm_name_node_to_idx, queue):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (MERGE)")
@@ -119,7 +119,7 @@ def worker_merge(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, shm_na
     print(f"[Worker {pid}] FINISHED. Found {local_count} triangles, in {time.time() - tri_time:.4f} secs", flush=True)
     queue.put(local_count)
 
-# Worker for hash-based triangle counting QUEUE TEST
+# Worker for hash-based triangle counting
 def worker_hash(shm_name_indptr, shm_name_indices, n_nodes, nodes_chunk, shm_name_node_to_idx, queue):
     pid = os.getpid()
     print(f"[Worker {pid}] STARTED with {len(nodes_chunk)} nodes (HASH)")
