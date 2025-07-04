@@ -47,25 +47,31 @@ def partition_by_master(adj, num_workers):
     return partitions, assignments, node_to_order, order_to_node
 
 def extract_subgraph_for_worker(adj, master_nodes):
+    nodes_time = time.time()
     nodes_needed = set(master_nodes)
     for u in master_nodes:
         nodes_needed.update(adj[u])
     nodes_needed = sorted(nodes_needed)
     global_to_local = {global_id: local_id for local_id, global_id in enumerate(nodes_needed)}
+    print(f"Extract nodes time: {time.time() - nodes_time:.3f} seconds")
     # Build subgraph as dict-of-sets
+    build_sub = time.time()
     sub_adj = {}
     for global_id in nodes_needed:
         local_id = global_to_local[global_id]
         sub_adj[local_id] = set(global_to_local[v] for v in adj[global_id] if v in global_to_local)
     master_local_ids = {global_to_local[u] for u in master_nodes}
     local_to_global = {local_id: global_id for global_id, local_id in global_to_local.items()}
+    print(f"Extract subgraph as dict-of-sets time: {time.time() - build_sub:.3f} seconds")
     return sub_adj, master_local_ids, global_to_local, local_to_global
 
 def extract_all_worker_data_master_mirror(adj, partitions, num_workers, node_to_order):
     worker_data = []
     for wid in range(num_workers):
         master_nodes = set(partitions[wid])
+        extract_subgraph_time = time.time()
         sub_adj, master_local_ids, global_to_local, local_to_global = extract_subgraph_for_worker(adj, master_nodes)
+        print(f'Extract subgraph time: {time.time() - extract_subgraph_time:.3f} seconds')
         worker_data.append((sub_adj, master_local_ids, node_to_order, local_to_global))
     return worker_data
 
