@@ -1,9 +1,13 @@
 import time
-from multiprocessing import Pool
+from multiprocessing import Pool, get_context
 import numpy as np
 import scipy.sparse as sp
 from numba import njit
 
+"""
+Pass Arrays, not CSR Objects - the main idea - best implementation till now
+Optimized for faster preprocessing by combining ordering and partitioning
+"""
 def read_graph_to_csr(filename):
     edges = []
     node_set = set()
@@ -19,39 +23,34 @@ def read_graph_to_csr(filename):
             except:
                 continue
     nodes = sorted(node_set)
-    node_id_map = {node: i for i, node in enumerate(nodes)}  # original id -> compact id
+    node_id_map = {node: i for i, node in enumerate(nodes)}
     remapped_edges = [(node_id_map[u], node_id_map[v]) for u, v in edges]
     rows, cols = zip(*remapped_edges)
     data = np.ones(len(rows), dtype=np.uint8)
     N = len(nodes)
     adj_upper = sp.coo_matrix((data, (rows, cols)), shape=(N, N))
-    adj = adj_upper + adj_upper.T
-    #adj.sort_indices()
+    adj = adj_upper + adj_upper.T  # undirected
     adj = adj.tocsr()
     return adj, nodes, node_id_map
 
-def get_ordering(adj):
+def get_ordering_and_partitions(adj, num_workers):
     degrees = np.array(adj.sum(axis=1)).flatten()
     order = np.lexsort((np.arange(adj.shape[0]), degrees))
-    node_to_order = {node: rank for rank, node in enumerate(order)}
-    order_to_node = {rank: node for rank, node in enumerate(order)}
-    return node_to_order, order_to_node
+    node_to_order = np.empty(adj.shape[0], dtype=np.int32)
+    for rank, node in enumerate(order):
+        node_to_order[node] = rank
 
-def partition_by_master(adj, num_workers):
-    node_to_order, order_to_node = get_ordering(adj)
-    n = adj.shape[0]
-    # Assign master by order
-    order_to_host = {rank: rank % num_workers for rank in range(n)}
+    order_to_node = order  # Array form, no dict needed
     partitions = [[] for _ in range(num_workers)]
-    assignments = np.zeros(n, dtype=int)
-    for node in range(n):
-        host = order_to_host[node_to_order[node]]
-        partitions[host].append(node)
-        assignments[node] = host
+    assignments = np.empty(adj.shape[0], dtype=np.int32)
+    for i, node in enumerate(order):
+        wid = i % num_workers
+        partitions[wid].append(node)
+        assignments[node] = wid
+
     return partitions, assignments, node_to_order, order_to_node
 
 def extract_subgraph_for_worker(adj, master_nodes):
-    # For each master node, include all its neighbors (mirrors)
     nodes_needed = set(master_nodes)
     for u in master_nodes:
         row_start, row_end = adj.indptr[u], adj.indptr[u + 1]
@@ -69,26 +68,50 @@ def extract_all_worker_data_master_mirror(adj, partitions, num_workers, node_to_
     for wid in range(num_workers):
         master_nodes = set(partitions[wid])
         sub_adj, master_local_ids, global_to_local, local_to_global = extract_subgraph_for_worker(adj, master_nodes)
-        worker_data.append((sub_adj, master_local_ids, node_to_order, local_to_global))
+        indptr = sub_adj.indptr
+        indices = sub_adj.indices
+        n = sub_adj.shape[0]
+        master_mask = np.zeros(n, dtype=np.bool_)
+        for idx in master_local_ids:
+            master_mask[idx] = True
+        order_array = node_to_order.copy()
+        local_to_global_array = np.empty(n, dtype=np.int32)
+        for local, global_id in local_to_global.items():
+            local_to_global_array[local] = global_id
+        worker_data.append((indptr, indices, master_mask, order_array, local_to_global_array))
     return worker_data
 
 @njit
-def count_triangles_master_only(csr_matrix_indptr, csr_matrix_indices, master_nodes, order_array, local_to_global_array):
+def merge_intersection_count(a, b):
+    count = 0
+    i = j = 0
+    while i < len(a) and j < len(b):
+        if a[i] == b[j]:
+            count += 1
+            i += 1
+            j += 1
+        elif a[i] < b[j]:
+            i += 1
+        else:
+            j += 1
+    return count
+
+@njit
+def count_triangles_master_only(indptr, indices, master_mask, order_array, local_to_global_array):
     count = 0
     n = len(local_to_global_array)
     for u_local in range(n):
-        if not master_nodes[u_local]:
+        if not master_mask[u_local]:
             continue
         u_global = local_to_global_array[u_local]
         u_order = order_array[u_global]
-        u_neighbors = csr_matrix_indices[csr_matrix_indptr[u_local]:csr_matrix_indptr[u_local + 1]]
+        u_neighbors = indices[indptr[u_local]:indptr[u_local+1]]
         for v_local in u_neighbors:
             v_global = local_to_global_array[v_local]
             v_order = order_array[v_global]
             if v_order <= u_order:
                 continue
-            v_neighbors = csr_matrix_indices[csr_matrix_indptr[v_local]:csr_matrix_indptr[v_local + 1]]
-            # Intersection for w > v
+            v_neighbors = indices[indptr[v_local]:indptr[v_local+1]]
             i = 0
             j = 0
             while i < len(u_neighbors) and j < len(v_neighbors):
@@ -109,36 +132,19 @@ def count_triangles_master_only(csr_matrix_indptr, csr_matrix_indices, master_no
     return count
 
 def count_triangles_worker_master_mirror(args):
-    csr_matrix, master_local_ids, node_to_order, local_to_global = args
-    n = csr_matrix.shape[0]
-    master_mask = np.zeros(n, dtype=np.bool_)
-    for idx in master_local_ids:
-        master_mask[idx] = True
-    # order_array: compact node id -> order
-    # node_to_order is {compact (0..N-1): order}
-    N = max(node_to_order.keys()) + 1
-    order_array = np.zeros(N, dtype=np.int32)
-    for node, order in node_to_order.items():
-        order_array[node] = order
-    # local_to_global_array: local id -> compact id
-    local_to_global_array = np.zeros(n, dtype=np.int32)
-    for local, global_id in local_to_global.items():
-        local_to_global_array[local] = global_id
-    return count_triangles_master_only(
-        csr_matrix.indptr, csr_matrix.indices, master_mask, order_array, local_to_global_array
-    )
+    return count_triangles_master_only(*args)
 
-def parallel_triangle_count_master_mirror(graph_csr, num_workers, partition_func):
+def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     partition_time = time.time()
-    partitions, assignments, node_to_order, order_to_node = partition_func(graph_csr, num_workers)
-    print(f"Partitioning took {time.time() - partition_time:.2f} seconds")
+    partitions, assignments, node_to_order, order_to_node = get_ordering_and_partitions(graph_csr, num_workers)
+    print(f"Partitioning + ordering took {time.time() - partition_time:.2f} seconds")
 
     data_prep_time = time.time()
     worker_data = extract_all_worker_data_master_mirror(graph_csr, partitions, num_workers, node_to_order)
     print(f"Data extraction took {time.time() - data_prep_time:.2f} seconds")
 
     triangle_count_time = time.time()
-    with Pool(num_workers) as pool:
+    with get_context("fork").Pool(num_workers) as pool:
         results = pool.map(count_triangles_worker_master_mirror, worker_data)
     print(f"Triangle counting took {time.time() - triangle_count_time:.2f} seconds")
 
@@ -153,9 +159,7 @@ if __name__ == "__main__":
     try:
         graph_csr, nodes, node_id_map = read_graph_to_csr(filepath + filename)
         start_time = time.time()
-        total_triangles = parallel_triangle_count_master_mirror(
-            graph_csr, num_workers, partition_by_master
-        )
+        total_triangles = parallel_triangle_count_master_mirror(graph_csr, num_workers)
         end_time = time.time()
         print(f"Total triangles: {total_triangles}")
         print("Triangle Algorithm time: ", end_time - start_time)
