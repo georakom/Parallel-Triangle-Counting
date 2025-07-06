@@ -1,174 +1,197 @@
-import random
 import time
-from multiprocessing import Pool
-import networkx as nx
-from collections import defaultdict
-import psutil
-import os
+from multiprocessing import Pool, get_context
+import numpy as np
+import scipy.sparse as sp
+from numba import njit
+import gc
+from concurrent.futures import ThreadPoolExecutor
 
-def extract_all_worker_data(G, partitions, assignments, num_workers):
-    """
-    Fast extraction of per-worker data for triangle counting.
-    Returns for each worker:
-      - A list of directed edges (u, v)
-      - A set of master nodes (owned by that worker)
-    """
-    start = time.time()
+"""
+Pass Arrays, not CSR Objects - the main idea - best implementation till now
+Optimized for faster preprocessing by combining ordering and partitioning
+Also uses multithreading for the data extraction 
+"""
+def read_graph_to_csr(filename):
+    edges = []
+    node_set = set()
+    with open(filename, 'r') as f:
+        for line in f:
+            try:
+                u, v = map(int, line.strip().split())
+                if u == v:
+                    continue
+                edges.append((u, v))
+                node_set.add(u)
+                node_set.add(v)
+            except:
+                continue
+    nodes = sorted(node_set)
+    node_id_map = {node: i for i, node in enumerate(nodes)}
+    remapped_edges = [(node_id_map[u], node_id_map[v]) for u, v in edges]
+    rows, cols = zip(*remapped_edges)
+    data = np.ones(len(rows), dtype=np.uint8)
+    N = len(nodes)
+    adj_upper = sp.coo_matrix((data, (rows, cols)), shape=(N, N))
+    adj = adj_upper + adj_upper.T  # undirected
+    adj = adj.tocsr()
+    return adj, nodes, node_id_map
 
-    # Per-worker containers
-    worker_edges = [set() for _ in range(num_workers)]      # edge list per worker
-    worker_nodes_used = [set() for _ in range(num_workers)] # all nodes used by that worker
-    node_to_workers = defaultdict(set)                      # node -> set of workers using it
+def get_ordering_and_partitions(adj, num_workers):
+    degrees = np.array(adj.sum(axis=1)).flatten()
+    order = np.lexsort((np.arange(adj.shape[0]), degrees))
+    node_to_order = np.empty(adj.shape[0], dtype=np.int32)
+    for rank, node in enumerate(order):
+        node_to_order[node] = rank
 
-    # First pass: assign all (u, v) edges to the worker that owns u (the source)
-    for u, v in G.edges():
-        if u == v:
-            continue  # skip self-loops just in case
+    order_to_node = order  # Array form, no dict needed
+    partitions = [[] for _ in range(num_workers)]
+    assignments = np.empty(adj.shape[0], dtype=np.int32)
+    for i, node in enumerate(order):
+        wid = i % num_workers
+        partitions[wid].append(node)
+        assignments[node] = wid
 
-        uid = assignments[u]
-        worker_edges[uid].add((u, v))
-        worker_nodes_used[uid].add(u)
-        worker_nodes_used[uid].add(v)
-        node_to_workers[u].add(uid)
-        node_to_workers[v].add(uid)
+    return partitions, assignments, node_to_order, order_to_node
 
-    # Second pass: insert missing edges as proxy edges (if (u,v) is used by multiple workers)
-    for u, v in G.edges():
-        shared_workers = node_to_workers[u] & node_to_workers[v]
-        for wid in shared_workers:
-            if (u, v) not in worker_edges[wid]:
-                worker_edges[wid].add((u, v))
-                worker_nodes_used[wid].add(u)
-                worker_nodes_used[wid].add(v)
+def extract_subgraph_for_worker(adj, master_nodes):
+    nodes_needed = set(master_nodes)
+    for u in master_nodes:
+        row_start, row_end = adj.indptr[u], adj.indptr[u + 1]
+        neighbors = adj.indices[row_start:row_end]
+        nodes_needed.update(neighbors)
+    nodes_needed = sorted(nodes_needed)
+    global_to_local = {global_id: local_id for local_id, global_id in enumerate(nodes_needed)}
+    sub_adj = adj[nodes_needed, :][:, nodes_needed].tocsr()
+    master_local_ids = {global_to_local[u] for u in master_nodes}
+    local_to_global = {local_id: global_id for global_id, local_id in global_to_local.items()}
+    return sub_adj, master_local_ids, global_to_local, local_to_global
 
-    # Build final output
+
+def _extract_worker_data_threaded(adj, master_nodes, node_to_order):
+    nodes_needed = set(master_nodes)
+    for u in master_nodes:
+        row_start, row_end = adj.indptr[u], adj.indptr[u + 1]
+        neighbors = adj.indices[row_start:row_end]
+        nodes_needed.update(neighbors)
+    nodes_needed = sorted(nodes_needed)
+    global_to_local = {global_id: local_id for local_id, global_id in enumerate(nodes_needed)}
+    sub_adj = adj[nodes_needed, :][:, nodes_needed].tocsr()
+    master_local_ids = {global_to_local[u] for u in master_nodes}
+    local_to_global = {local_id: global_id for global_id, local_id in global_to_local.items()}
+
+    indptr = sub_adj.indptr
+    indices = sub_adj.indices
+    n = sub_adj.shape[0]
+
+    master_mask = np.zeros(n, dtype=np.bool_)
+    for idx in master_local_ids:
+        master_mask[idx] = True
+
+    order_array = node_to_order.copy()
+    local_to_global_array = np.empty(n, dtype=np.int32)
+    for local, global_id in local_to_global.items():
+        local_to_global_array[local] = global_id
+
+    return (indptr, indices, master_mask, order_array, local_to_global_array)
+
+def extract_all_worker_data_master_mirror(adj, partitions, num_workers, node_to_order):
     worker_data = []
-    for wid in range(num_workers):
-        masters = set(partitions[wid])
-        mirrors = worker_nodes_used[wid] - masters
-        print(f"[Worker {wid}] Total edges: {len(worker_edges[wid])}, Mirrors: {len(mirrors)}")
-        edge_list = list(worker_edges[wid])
-        worker_data.append((edge_list, masters))
-
-    print(f"Worker data extraction took: {time.time() - start:.4f} seconds")
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = []
+        for wid in range(num_workers):
+            master_nodes = set(partitions[wid])
+            futures.append(executor.submit(_extract_worker_data_threaded, adj, master_nodes, node_to_order))
+        for future in futures:
+            worker_data.append(future.result())
     return worker_data
 
-# def extract_all_worker_data(G, partitions, assignments, num_workers):
-#     # Initialize storage per worker
-#     worker_edges = [set() for _ in range(num_workers)]
-#     worker_nodes_used = [set() for _ in range(num_workers)]
-#
-#     # Track which workers need each node
-#     node_to_workers = defaultdict(set)
-#
-#     # Pass 1: assign directed edge (u → v) to master of u, and update who uses what
-#     for u, v in G.edges():
-#         if u > v:
-#             u, v = v, u  # enforce direction u → v
-#
-#         worker_id = assignments[u]
-#         worker_edges[worker_id].add((u, v))
-#         worker_nodes_used[worker_id].update([u, v])
-#         node_to_workers[u].add(worker_id)
-#         node_to_workers[v].add(worker_id)
-#
-#     # Inline proxy edge insertion
-#     for u, v in G.edges():
-#         if u > v:
-#             u, v = v, u
-#
-#         shared_workers = node_to_workers[u] & node_to_workers[v]
-#         for wid in shared_workers:
-#             worker_edges[wid].add((u, v))
-#
-#     # Final prep
-#     worker_data = []
-#     for worker_id in range(num_workers):
-#         masters = set(partitions[worker_id])
-#         used_nodes = {u for edge in worker_edges[worker_id] for u in edge}
-#         mirrors = used_nodes - masters
-#         print(f"[Worker {worker_id}] Mirror nodes: {len(mirrors)}")
-#         worker_data.append((list(worker_edges[worker_id]), masters))
-#
-#     return worker_data
-
-def count_triangles(edge_list, master_nodes):
-    process = psutil.Process()
-    mem_usage_mb = process.memory_info().rss / (1024 * 1024)
-
+@njit
+def merge_intersection_count(a, b):
     count = 0
-    neighbor_sets = defaultdict(set)
-
-    # Build adjacency (only forward edges u < v)
-    for u, v in edge_list:
-        neighbor_sets[u].add(v)
-
-    for u in master_nodes:
-        for v in neighbor_sets[u]:
-            count += len(neighbor_sets[v] & neighbor_sets[u])
-
-    print(f"[Worker {os.getpid()}] FINISHED. Found {count} triangles. Memory used: {mem_usage_mb:.2f} MB")
+    i = j = 0
+    while i < len(a) and j < len(b):
+        if a[i] == b[j]:
+            count += 1
+            i += 1
+            j += 1
+        elif a[i] < b[j]:
+            i += 1
+        else:
+            j += 1
     return count
 
+@njit
+def count_triangles_master_only(indptr, indices, master_mask, order_array, local_to_global_array):
+    count = 0
+    n = len(local_to_global_array)
+    for u_local in range(n):
+        if not master_mask[u_local]:
+            continue
+        u_global = local_to_global_array[u_local]
+        u_order = order_array[u_global]
+        u_neighbors = indices[indptr[u_local]:indptr[u_local+1]]
+        for v_local in u_neighbors:
+            v_global = local_to_global_array[v_local]
+            v_order = order_array[v_global]
+            if v_order <= u_order:
+                continue
+            v_neighbors = indices[indptr[v_local]:indptr[v_local+1]]
+            i = 0
+            j = 0
+            while i < len(u_neighbors) and j < len(v_neighbors):
+                w_local = u_neighbors[i]
+                w_global = local_to_global_array[w_local]
+                w_order = order_array[w_global]
+                if w_local == v_local or w_order <= v_order:
+                    i += 1
+                    continue
+                if w_local == v_neighbors[j]:
+                    count += 1
+                    i += 1
+                    j += 1
+                elif w_local < v_neighbors[j]:
+                    i += 1
+                else:
+                    j += 1
+    return count
 
-def parallel_triangle_count(G, num_workers, partition_func):
-    start = time.time()
-    partitions, assignments = partition_func(G, num_workers)
-    prep_start = time.time()
+def count_triangles_worker_master_mirror(args):
+    return count_triangles_master_only(*args)
 
-    worker_data = extract_all_worker_data(G, partitions, assignments, num_workers)
-    print(f"Data preparation took: {time.time() - prep_start:.4f} seconds")
-    print(f"Preprocessing took: {time.time() - start:.4f} seconds")
+def parallel_triangle_count_master_mirror(graph_csr, num_workers):
+    partition_time = time.time()
+    partitions, assignments, node_to_order, order_to_node = get_ordering_and_partitions(graph_csr, num_workers)
+    print(f"Partitioning + ordering took {time.time() - partition_time:.2f} seconds")
 
-    triangle_time = time.time()
-    with Pool(num_workers) as pool:
-        results = pool.starmap(count_triangles, worker_data)
-    print(f"Pure triangle counting took: {time.time() - triangle_time:.4f} seconds")
+    data_prep_time = time.time()
+    worker_data = extract_all_worker_data_master_mirror(graph_csr, partitions, num_workers, node_to_order)
+    print(f"Data extraction took {time.time() - data_prep_time:.2f} seconds")
+    del partitions
+    del node_to_order
+    del graph_csr
+    gc.collect()
+    triangle_count_time = time.time()
+    with get_context("fork").Pool(num_workers) as pool:
+        results = pool.map(count_triangles_worker_master_mirror, worker_data)
+    print(f"Triangle counting took {time.time() - triangle_count_time:.2f} seconds")
+
+    for wid, count in enumerate(results):
+        print(f"Worker {wid} counted {count} triangles")
     return sum(results)
 
-def read_graph_from_file(filename, batch_size=1_000_000):
-    G = nx.DiGraph()  # Directed!
-    edge_buffer = []
-
-    with open(filename, 'r') as file:
-        for line in file:
-            parts = line.strip().split()
-            if len(parts) == 2:
-                try:
-                    u, v = map(int, parts)
-                    if u > v:
-                        u, v = v, u  # Enforce u < v
-                    edge_buffer.append((u, v))
-
-                    if len(edge_buffer) >= batch_size:
-                        random.shuffle(edge_buffer)
-                        G.add_edges_from(edge_buffer)
-                        edge_buffer = []
-                except ValueError:
-                    continue
-
-        if edge_buffer:
-            random.shuffle(edge_buffer)
-            G.add_edges_from(edge_buffer)
-
-    return G
-
-
 if __name__ == "__main__":
-    import Partitioners as p # Importing the partitioning algorithm to use
-
     filepath = "/data/delab/georakom/"
-    filename = "com-lj.ungraph.txt"
-
+    filename = "lfriendster.txt"
+    num_workers = 4
     try:
-        graph = read_graph_from_file(filepath + filename)
-
+        graph_csr, nodes, node_id_map = read_graph_to_csr(filepath + filename)
+        del nodes
+        del node_id_map
+        gc.collect()
         start_time = time.time()
-        total_triangles = parallel_triangle_count(graph, 4, p.ldg_partition) # Deciding the partition
+        total_triangles = parallel_triangle_count_master_mirror(graph_csr, num_workers)
         end_time = time.time()
-
         print(f"Total triangles: {total_triangles}")
         print("Triangle Algorithm time: ", end_time - start_time)
-
     except FileNotFoundError:
         print("Graph file not found.")
