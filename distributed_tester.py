@@ -3,6 +3,7 @@ from multiprocessing import Pool, get_context
 import numpy as np
 import scipy.sparse as sp
 from numba import njit
+import gc
 
 """
 Pass Arrays, not CSR Objects - the main idea - best implementation till now
@@ -142,7 +143,10 @@ def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     data_prep_time = time.time()
     worker_data = extract_all_worker_data_master_mirror(graph_csr, partitions, num_workers, node_to_order)
     print(f"Data extraction took {time.time() - data_prep_time:.2f} seconds")
-
+    del partitions
+    del node_to_order
+    del graph_csr
+    gc.collect()
     triangle_count_time = time.time()
     with get_context("fork").Pool(num_workers) as pool:
         results = pool.map(count_triangles_worker_master_mirror, worker_data)
@@ -154,10 +158,13 @@ def parallel_triangle_count_master_mirror(graph_csr, num_workers):
 
 if __name__ == "__main__":
     filepath = "/data/delab/georakom/"
-    filename = "com-lj.ungraph.txt"
+    filename = "lfriendster.txt"
     num_workers = 4
     try:
         graph_csr, nodes, node_id_map = read_graph_to_csr(filepath + filename)
+        del nodes
+        del node_id_map
+        gc.collect()
         start_time = time.time()
         total_triangles = parallel_triangle_count_master_mirror(graph_csr, num_workers)
         end_time = time.time()
