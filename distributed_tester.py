@@ -53,6 +53,8 @@ def extract_all_worker_data_master_mirror(adj, partitions, num_workers, node_to_
     for wid in range(num_workers):
         master_nodes = set(partitions[wid])
         sub_adj, master_local_ids, global_to_local, local_to_global = extract_subgraph_for_worker(adj, master_nodes)
+        num_mirrors = len(global_to_local) - len(master_nodes)
+        print(f"Worker {wid} has {num_mirrors} mirror nodes.")
         indptr = sub_adj.indptr
         indices = sub_adj.indices
         n = sub_adj.shape[0]
@@ -141,8 +143,8 @@ def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     return sum(results)
 
 if __name__ == "__main__":
-    filepath = "./data/"
-    filename = "facebook.txt"
+    filepath = "/data/delab/georakom/"
+    filename = "as-skitter.txt"
     num_workers = 4
     try:
         graph_csr, nodes, node_id_map = read_graph_to_csr(filepath + filename)

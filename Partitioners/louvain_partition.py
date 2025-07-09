@@ -18,10 +18,12 @@ def partition_graph(adj, num_workers):
     start = time.time()
 
     # Convert CSR to NetworkX
-    G_nx = nx.from_scipy_sparse_matrix(adj)
+    coo = adj.tocoo()
+    G = nx.Graph()
+    G.add_edges_from(zip(coo.row.tolist(), coo.col.tolist()))
 
     # Run Louvain algorithm
-    partition = community_louvain.best_partition(G_nx, resolution=1.0, random_state=42)
+    partition = community_louvain.best_partition(G, resolution=1.0, random_state=42)
 
     # Group by community
     communities = defaultdict(list)

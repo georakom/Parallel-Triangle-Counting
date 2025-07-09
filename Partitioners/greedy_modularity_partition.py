@@ -14,11 +14,10 @@ def partition_graph(adj, num_workers):
     """Partition using Greedy Modularity and round-robin assignment."""
     start = time.time()
 
-    # Convert CSR to NetworkX if needed
-    if not isinstance(adj, nx.Graph):
-        G = nx.from_scipy_sparse_matrix(adj)
-    else:
-        G = adj
+    # Convert CSR to NetworkX
+    coo = adj.tocoo()
+    G = nx.Graph()
+    G.add_edges_from(zip(coo.row.tolist(), coo.col.tolist()))
 
     # Detect communities using greedy modularity
     communities = list(nx.algorithms.community.greedy_modularity_communities(G))

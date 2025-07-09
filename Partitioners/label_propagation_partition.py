@@ -14,11 +14,10 @@ def partition_graph(adj, num_workers):
 
     start = time.time()
 
-    # Convert CSR matrix to NetworkX graph if needed
-    if not isinstance(adj, nx.Graph):
-        G = nx.from_scipy_sparse_matrix(adj)
-    else:
-        G = adj
+    # Convert CSR to NetworkX
+    coo = adj.tocoo()
+    G = nx.Graph()
+    G.add_edges_from(zip(coo.row.tolist(), coo.col.tolist()))
 
     # Detect communities using LPA
     communities = list(nx.algorithms.community.label_propagation.asyn_lpa_communities(G, seed=42))
