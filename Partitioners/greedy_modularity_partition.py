@@ -1,6 +1,6 @@
 import networkx as nx
 import time
-
+import numpy as np
 """
 Distributed Parallel Triangle Counting using Greedy Modularity Communities.
 This approach partitions the graph using Clauset-Newman-Moore’s greedy modularity maximization. 
@@ -10,16 +10,22 @@ Despite being faster than Louvain, it still incurs significant preprocessing tim
 and tends to form a small number of large communities, which may cause load imbalance and hinder scalability.
 """
 
-def partition_graph(G, num_workers):
+def partition_graph(adj, num_workers):
     """Partition using Greedy Modularity and round-robin assignment."""
     start = time.time()
 
-    # Detect communities
+    # Convert CSR to NetworkX if needed
+    if not isinstance(adj, nx.Graph):
+        G = nx.from_scipy_sparse_matrix(adj)
+    else:
+        G = adj
+
+    # Detect communities using greedy modularity
     communities = list(nx.algorithms.community.greedy_modularity_communities(G))
 
     # Prepare empty partitions and assignment map
     partitions = [[] for _ in range(num_workers)]
-    assignments = {}
+    assignments = np.empty(G.number_of_nodes(), dtype=np.int32)
 
     # Assign each community to a worker in round-robin fashion
     for i, comm in enumerate(communities):
@@ -28,6 +34,15 @@ def partition_graph(G, num_workers):
             partitions[worker_id].append(node)
             assignments[node] = worker_id
 
+    # Use degree-based ordering for node_to_order and order_to_node
+    degrees = dict(G.degree())
+    order = sorted(G.nodes(), key=lambda n: (degrees[n], n))
+    node_to_order = {}
+    for rank, node in enumerate(order):
+        node_to_order[node] = rank
+    order_to_node = np.array(order)
+
     print(f"Found {len(communities)} communities, assigned to {num_workers} workers")
     print(f"Greedy Modularity took: {time.time() - start:.4f} seconds")
-    return partitions, assignments
+    print("Partition sizes:", [len(p) for p in partitions])
+    return partitions, assignments, node_to_order, order_to_node

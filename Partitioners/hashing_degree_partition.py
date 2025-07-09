@@ -1,28 +1,29 @@
 import time
-
+import numpy as np
 """
 Hybrid Hashing + Degree Chunking.
 Groups nodes into degree-sorted chunks, then hashes chunks to partitions.
-Attempts to balance the benefits of degree-aware and hashed partitioning.
+Attempts to balance the benefits of degree-aware and hashed partitioning (triangle balance and speed)
 """
 
-def partition_graph_hybrid(G, num_workers, chunk_size=1000):
+def partition_graph_hybrid(adj, num_workers):
     start = time.time()
+    N = adj.shape[0]
+    degrees = np.array(adj.sum(axis=1)).flatten()
+    order = np.lexsort((np.arange(N), degrees))
+    node_to_order = np.empty(N, dtype=np.int32)
+    for rank, node in enumerate(order):
+        node_to_order[node] = rank
+    order_to_node = order
 
-    # Initialize containers
     partitions = [[] for _ in range(num_workers)]
-    assignments = {}
+    assignments = np.empty(N, dtype=np.int32)
 
-    # Sort nodes by degree and split into chunks
-    nodes_sorted = sorted(G.nodes(), key=lambda x: G.degree(x), reverse=True)
-    chunks = [nodes_sorted[i:i + chunk_size] for i in range(0, len(nodes_sorted), chunk_size)]
+    # Hash assignment using degree order
+    for node in order:
+        wid = hash(node) % num_workers
+        partitions[wid].append(node)
+        assignments[node] = wid
 
-    # Hash each chunk to assign it to a partition
-    for chunk in chunks:
-        part = hash(tuple(chunk)) % num_workers  # Hash entire chunk
-        partitions[part].extend(chunk)
-        for node in chunk:
-            assignments[node] = part
-
-    print(f"Hybrid partitioning took: {time.time() - start:.4f} seconds")
-    return partitions, assignments
+    print(f"Hashing by degree partitioning took: {time.time() - start:.4f} seconds")
+    return partitions, assignments, node_to_order, order_to_node

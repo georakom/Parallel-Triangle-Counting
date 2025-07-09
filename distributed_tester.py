@@ -4,6 +4,7 @@ import numpy as np
 import scipy.sparse as sp
 from numba import njit
 import gc
+import Partitioners as p
 
 """
 Pass Arrays, not CSR Objects - the main idea - best implementation till now
@@ -33,23 +34,6 @@ def read_graph_to_csr(filename):
     adj = adj_upper + adj_upper.T  # undirected
     adj = adj.tocsr()
     return adj, nodes, node_id_map
-
-def get_ordering_and_partitions(adj, num_workers):
-    degrees = np.array(adj.sum(axis=1)).flatten()
-    order = np.lexsort((np.arange(adj.shape[0]), degrees))
-    node_to_order = np.empty(adj.shape[0], dtype=np.int32)
-    for rank, node in enumerate(order):
-        node_to_order[node] = rank
-
-    order_to_node = order  # Array form, no dict needed
-    partitions = [[] for _ in range(num_workers)]
-    assignments = np.empty(adj.shape[0], dtype=np.int32)
-    for i, node in enumerate(order):
-        wid = i % num_workers
-        partitions[wid].append(node)
-        assignments[node] = wid
-
-    return partitions, assignments, node_to_order, order_to_node
 
 def extract_subgraph_for_worker(adj, master_nodes):
     nodes_needed = set(master_nodes)
@@ -137,7 +121,7 @@ def count_triangles_worker_master_mirror(args):
 
 def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     partition_time = time.time()
-    partitions, assignments, node_to_order, order_to_node = get_ordering_and_partitions(graph_csr, num_workers)
+    partitions, assignments, node_to_order, order_to_node = p.hashing_partition(graph_csr, num_workers)
     print(f"Partitioning + ordering took {time.time() - partition_time:.2f} seconds")
 
     data_prep_time = time.time()
@@ -148,7 +132,7 @@ def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     del graph_csr
     gc.collect()
     triangle_count_time = time.time()
-    with get_context("fork").Pool(num_workers) as pool:
+    with get_context("spawn").Pool(num_workers) as pool:
         results = pool.map(count_triangles_worker_master_mirror, worker_data)
     print(f"Triangle counting took {time.time() - triangle_count_time:.2f} seconds")
 
@@ -157,8 +141,8 @@ def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     return sum(results)
 
 if __name__ == "__main__":
-    filepath = "/data/delab/georakom/"
-    filename = "lfriendster.txt"
+    filepath = "./data/"
+    filename = "facebook.txt"
     num_workers = 4
     try:
         graph_csr, nodes, node_id_map = read_graph_to_csr(filepath + filename)

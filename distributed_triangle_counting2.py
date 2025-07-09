@@ -5,7 +5,8 @@ import scipy.sparse as sp
 from numba import njit
 
 """
-Pass Arrays, not CSR Objects
+Alternative code for Distributed Triangle Counting
+Passes Arrays, not CSR Objects
 """
 def read_graph_to_csr(filename):
     edges = []

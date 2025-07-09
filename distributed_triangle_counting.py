@@ -5,9 +5,10 @@ import scipy.sparse as sp
 from numba import njit
 import gc
 from concurrent.futures import ThreadPoolExecutor
+import Partitioners as p
 
 """
-Pass Arrays, not CSR Objects - the main idea - best implementation till now
+Pass Arrays, not CSR Objects 
 Optimized for faster preprocessing by combining ordering and partitioning
 Also uses multithreading for the data extraction 
 """
@@ -35,23 +36,6 @@ def read_graph_to_csr(filename):
     adj = adj_upper + adj_upper.T  # undirected
     adj = adj.tocsr()
     return adj, nodes, node_id_map
-
-def get_ordering_and_partitions(adj, num_workers):
-    degrees = np.array(adj.sum(axis=1)).flatten()
-    order = np.lexsort((np.arange(adj.shape[0]), degrees))
-    node_to_order = np.empty(adj.shape[0], dtype=np.int32)
-    for rank, node in enumerate(order):
-        node_to_order[node] = rank
-
-    order_to_node = order  # Array form, no dict needed
-    partitions = [[] for _ in range(num_workers)]
-    assignments = np.empty(adj.shape[0], dtype=np.int32)
-    for i, node in enumerate(order):
-        wid = i % num_workers
-        partitions[wid].append(node)
-        assignments[node] = wid
-
-    return partitions, assignments, node_to_order, order_to_node
 
 def extract_subgraph_for_worker(adj, master_nodes):
     nodes_needed = set(master_nodes)
@@ -92,7 +76,7 @@ def _extract_worker_data_threaded(adj, master_nodes, node_to_order):
     for local, global_id in local_to_global.items():
         local_to_global_array[local] = global_id
 
-    return (indptr, indices, master_mask, order_array, local_to_global_array)
+    return indptr, indices, master_mask, order_array, local_to_global_array
 
 def extract_all_worker_data_master_mirror(adj, partitions, num_workers, node_to_order):
     worker_data = []
@@ -160,7 +144,7 @@ def count_triangles_worker_master_mirror(args):
 
 def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     partition_time = time.time()
-    partitions, assignments, node_to_order, order_to_node = get_ordering_and_partitions(graph_csr, num_workers)
+    partitions, assignments, node_to_order, order_to_node = p.degree_partition(graph_csr, num_workers)
     print(f"Partitioning + ordering took {time.time() - partition_time:.2f} seconds")
 
     data_prep_time = time.time()

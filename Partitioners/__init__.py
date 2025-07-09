@@ -1,4 +1,4 @@
-from .metis_partition import partition_graph as metis_partition
+from .metis_partition import metis_partition as metis_partition
 from .louvain_partition import partition_graph as louvain_partition
 from .label_propagation_partition import partition_graph as label_propagation_partition
 from .greedy_modularity_partition import partition_graph as greedy_modularity_partition
@@ -9,4 +9,3 @@ from .degree_partition import partition_graph_degree as degree_partition
 from .hashing_degree_partition import partition_graph_hybrid as hashing_degree_partition
 from .neighbor_metis_partition import improved_neighbor_metis_partition as neighbor_metis_partition
 from .random_partition import partition_graph_random as random_partition
-from .hashing_metis_partition import improved_hash_metis_partition as hashing_metis_partition
