@@ -22,7 +22,6 @@ def partition_graph_hash(adj_csr, num_workers):
 
     # For consistency, use node id as the ordering (could also use degree)
     node_to_order = np.arange(N, dtype=np.int32)
-    order_to_node = np.arange(N, dtype=np.int32)
 
     print(f"Hashing partitioning took: {time.time() - start:.4f} seconds")
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order

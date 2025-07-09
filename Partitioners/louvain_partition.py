@@ -47,11 +47,10 @@ def partition_graph(adj, num_workers):
     node_to_order = np.empty(adj.shape[0], dtype=np.int32)
     for rank, node in enumerate(order):
         node_to_order[node] = rank
-    order_to_node = order
 
     print(f"Assigned {len(sorted_communities)} communities to {num_workers} workers.")
     print(f"Louvain partitioning took: {time.time() - start:.2f} seconds")
 
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order
 
 

@@ -121,7 +121,7 @@ def count_triangles_worker_master_mirror(args):
 
 def parallel_triangle_count_master_mirror(graph_csr, num_workers):
     partition_time = time.time()
-    partitions, assignments, node_to_order, order_to_node = p.hashing_partition(graph_csr, num_workers)
+    partitions, assignments, node_to_order = p.degree_partition(graph_csr, num_workers)
     print(f"Partitioning + ordering took {time.time() - partition_time:.2f} seconds")
 
     data_prep_time = time.time()

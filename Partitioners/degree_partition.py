@@ -14,7 +14,6 @@ def partition_graph_degree(adj, num_workers):
     for rank, node in enumerate(order):
         node_to_order[node] = rank
 
-    order_to_node = order  # Array form, no dict needed
     partitions = [[] for _ in range(num_workers)]
     assignments = np.empty(adj.shape[0], dtype=np.int32)
     for i, node in enumerate(order):
@@ -22,4 +21,4 @@ def partition_graph_degree(adj, num_workers):
         partitions[wid].append(node)
         assignments[node] = wid
 
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order

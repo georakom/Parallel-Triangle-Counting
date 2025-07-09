@@ -40,9 +40,8 @@ def partition_graph(adj, num_workers):
     node_to_order = {}
     for rank, node in enumerate(order):
         node_to_order[node] = rank
-    order_to_node = np.array(order)
 
     print(f"Found {len(communities)} communities, assigned to {num_workers} workers")
     print(f"Greedy Modularity took: {time.time() - start:.4f} seconds")
     print("Partition sizes:", [len(p) for p in partitions])
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order

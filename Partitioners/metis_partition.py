@@ -34,8 +34,7 @@ def metis_partition(adj, num_workers):
     node_to_order = np.empty(adj.shape[0], dtype=np.int32)
     for rank, node in enumerate(order):
         node_to_order[node] = rank
-    order_to_node = order
 
     print(f"METIS partitioning took: {time.time() - start:.2f} seconds")
     print("Partition sizes:", [len(p) for p in partitions])
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order

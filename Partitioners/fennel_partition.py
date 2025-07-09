@@ -39,9 +39,8 @@ def partition_graph(adj, num_workers, alpha=1.5):
     node_to_order = np.empty(N, dtype=np.int32)
     for rank, node in enumerate(order):
         node_to_order[node] = rank
-    order_to_node = order
 
     print(f"Fennel-CSR partitioning complete. Assigned {N} nodes to {num_workers} partitions.")
     print(f"Fennel-CSR took: {time.time() - start:.4f} seconds.")
     print("Partition sizes:", [len(p) for p in partitions])
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order

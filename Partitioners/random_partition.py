@@ -33,7 +33,6 @@ def partition_graph_random(adj, num_workers, imbalance_factor=1.1):
     node_to_order = np.empty(n, dtype=np.int32)
     for rank, node in enumerate(order):
         node_to_order[node] = rank
-    order_to_node = order
 
     print(f"Random balanced partitioning took: {time.time() - start:.2f} seconds")
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order

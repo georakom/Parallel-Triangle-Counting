@@ -64,7 +64,6 @@ def improved_neighbor_metis_partition(adj, num_workers, degree_cutoff=10000):
     node_to_order = np.empty(adj.shape[0], dtype=np.int32)
     for rank, node in enumerate(order):
         node_to_order[node] = rank
-    order_to_node = order
 
     print(f"Hybrid METIS+neighbor partitioning took: {time.time() - start:.2f} seconds")
-    return partitions, assignments, node_to_order, order_to_node
+    return partitions, assignments, node_to_order
