@@ -35,12 +35,15 @@ def read_graph_to_csr(filename):
     adj = adj.tocsr()
     return adj, nodes, node_id_map
 
-def extract_subgraph_for_worker(adj, master_nodes):
+def extract_subgraph_for_worker(adj, master_nodes, node_to_order):
     nodes_needed = set(master_nodes)
     for u in master_nodes:
         row_start, row_end = adj.indptr[u], adj.indptr[u + 1]
         neighbors = adj.indices[row_start:row_end]
-        nodes_needed.update(neighbors)
+        u_order = node_to_order[u]
+        for v in neighbors:
+            if node_to_order[v] > u_order:
+                nodes_needed.add(v)
     nodes_needed = sorted(nodes_needed)
     global_to_local = {global_id: local_id for local_id, global_id in enumerate(nodes_needed)}
     sub_adj = adj[nodes_needed, :][:, nodes_needed].tocsr()
@@ -48,11 +51,12 @@ def extract_subgraph_for_worker(adj, master_nodes):
     local_to_global = {local_id: global_id for global_id, local_id in global_to_local.items()}
     return sub_adj, master_local_ids, global_to_local, local_to_global
 
-def extract_all_worker_data_master_mirror(adj, partitions, num_workers, node_to_order):
+
+def extract_all_worker_data(adj, partitions, num_workers, node_to_order):
     worker_data = []
     for wid in range(num_workers):
         master_nodes = set(partitions[wid])
-        sub_adj, master_local_ids, global_to_local, local_to_global = extract_subgraph_for_worker(adj, master_nodes)
+        sub_adj, master_local_ids, global_to_local, local_to_global = extract_subgraph_for_worker(adj, master_nodes, node_to_order)
         num_mirrors = len(global_to_local) - len(master_nodes)
         print(f"Worker {wid} has {num_mirrors} mirror nodes.")
         indptr = sub_adj.indptr
@@ -69,21 +73,6 @@ def extract_all_worker_data_master_mirror(adj, partitions, num_workers, node_to_
     return worker_data
 
 @njit
-def merge_intersection_count(a, b):
-    count = 0
-    i = j = 0
-    while i < len(a) and j < len(b):
-        if a[i] == b[j]:
-            count += 1
-            i += 1
-            j += 1
-        elif a[i] < b[j]:
-            i += 1
-        else:
-            j += 1
-    return count
-
-@njit
 def count_triangles_master_only(indptr, indices, master_mask, order_array, local_to_global_array):
     count = 0
     n = len(local_to_global_array)
@@ -92,13 +81,13 @@ def count_triangles_master_only(indptr, indices, master_mask, order_array, local
             continue
         u_global = local_to_global_array[u_local]
         u_order = order_array[u_global]
-        u_neighbors = indices[indptr[u_local]:indptr[u_local+1]]
+        u_neighbors = indices[indptr[u_local]:indptr[u_local + 1]]
         for v_local in u_neighbors:
             v_global = local_to_global_array[v_local]
             v_order = order_array[v_global]
             if v_order <= u_order:
                 continue
-            v_neighbors = indices[indptr[v_local]:indptr[v_local+1]]
+            v_neighbors = indices[indptr[v_local]:indptr[v_local + 1]]
             i = 0
             j = 0
             while i < len(u_neighbors) and j < len(v_neighbors):
@@ -118,29 +107,31 @@ def count_triangles_master_only(indptr, indices, master_mask, order_array, local
                     j += 1
     return count
 
-def count_triangles_worker_master_mirror(args):
+def count_triangles_worker(args):
     return count_triangles_master_only(*args)
 
-def parallel_triangle_count_master_mirror(graph_csr, num_workers):
+
+def parallel_triangle_count(graph_csr, num_workers):
     partition_time = time.time()
-    partitions, assignments, node_to_order = p.degree_partition(graph_csr, num_workers)
+    partitions, assignments, node_to_order = p.neighbor_metis_partition(graph_csr, num_workers)
     print(f"Partitioning + ordering took {time.time() - partition_time:.2f} seconds")
 
     data_prep_time = time.time()
-    worker_data = extract_all_worker_data_master_mirror(graph_csr, partitions, num_workers, node_to_order)
+    worker_data = extract_all_worker_data(graph_csr, partitions, num_workers, node_to_order)
     print(f"Data extraction took {time.time() - data_prep_time:.2f} seconds")
     del partitions
     del node_to_order
     del graph_csr
     gc.collect()
     triangle_count_time = time.time()
-    with get_context("spawn").Pool(num_workers) as pool:
-        results = pool.map(count_triangles_worker_master_mirror, worker_data)
+    with get_context("fork").Pool(num_workers) as pool:
+        results = pool.map(count_triangles_worker, worker_data)
     print(f"Triangle counting took {time.time() - triangle_count_time:.2f} seconds")
 
     for wid, count in enumerate(results):
         print(f"Worker {wid} counted {count} triangles")
     return sum(results)
+
 
 if __name__ == "__main__":
     filepath = "/data/delab/georakom/"
@@ -152,7 +143,7 @@ if __name__ == "__main__":
         del node_id_map
         gc.collect()
         start_time = time.time()
-        total_triangles = parallel_triangle_count_master_mirror(graph_csr, num_workers)
+        total_triangles = parallel_triangle_count(graph_csr, num_workers)
         end_time = time.time()
         print(f"Total triangles: {total_triangles}")
         print("Triangle Algorithm time: ", end_time - start_time)
